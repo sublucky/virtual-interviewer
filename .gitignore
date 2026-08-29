@@ -1,0 +1,15 @@
+# 敏感配置：私有化部署服务器信息，绝不上传
+deploy/server.conf
+server.conf
+
+# 环境与密钥
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 系统
+.DS_Store

@@ -1,6 +1,6 @@
 # 虚拟面试官系统需求分析
 
-> 版本：v0.2（增加 RAG 与语料管理）  
+> 版本：v0.3（增加私有化部署配置文件）  
 > 日期：2026-08-29  
 > 状态：待评审
 
@@ -104,6 +104,7 @@ journey
 | 语料初始化 | 内置 5 个岗位的基础题库与评分要点 | P0 | 脚本/配置文件入库 |
 | 评估报告 | 综合分、维度分、加分/风险、下一轮建议 | P0 | JSON + 页面展示，评分引用评分要点 |
 | 会话管理 | 单场面试创建、进行、结束、查询 | P0 | 内存态即可 |
+| 私有化部署配置 | GPU 服务器连接与路径配置集中在一个本地配置文件 | P0 | 含敏感信息，gitignore 不上传 GitHub |
 
 ### 4.2 完整产品（第二阶段）
 
@@ -136,6 +137,7 @@ journey
 | 并发 | 完整产品 | 50+ 路 |
 | 可用性 | 单场面试成功率 | > 99% |
 | 安全 | 对话数据 | 本地/私有部署，不出内网 |
+| 安全 | 部署配置与凭证 | `deploy/server.conf` 等敏感配置 gitignore，不进仓库 |
 | 兼容 | 浏览器 | Chrome / Edge 最新版 |
 
 ---
@@ -420,7 +422,28 @@ flowchart LR
 
 注：Embedding 模型（bge-m3）可 CPU 运行，不新增 GPU 需求。
 
-### 10.3 监控指标
+### 10.3 私有化部署配置文件
+
+GPU 服务器的连接与部署参数集中在 `deploy/server.conf`（本地文件，**不上传 GitHub**）：
+
+```bash
+# deploy/server.conf —— 含敏感信息，已被 .gitignore 排除
+REMOTE_HOST=        # GPU 服务器地址
+REMOTE_PORT=        # SSH 端口
+REMOTE_USER=        # 登录用户
+REMOTE_PASS=        # 登录密码（或改用密钥）
+REMOTE_DIR=         # 远端部署目录
+VLLM_PORT=8000      # vLLM 服务端口
+LIVETALKING_PORT=8010
+APP_PORT=8090
+```
+
+要求：
+- 仓库内只提交模板 `deploy/server.conf.example`（字段同上、值为空）
+- `deploy/server.conf` 写入 `.gitignore`，提交前 `git status` 必须确认其未被跟踪
+- 部署/同步脚本（如 rsync 脚本）无参数运行时自动加载该文件
+
+### 10.4 监控指标
 - LLM 首 token 延迟、吞吐
 - TTS 合成延迟
 - 视频帧率与口型同步误差
