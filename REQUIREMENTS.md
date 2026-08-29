@@ -1,6 +1,6 @@
 # 虚拟面试官系统需求分析
 
-> 版本：v0.3（增加私有化部署配置文件）  
+> 版本：v0.4（增加 Debug 模式）  
 > 日期：2026-08-29  
 > 状态：待评审
 
@@ -42,6 +42,7 @@
 2. **岗位定制**（下期）：HR 上传 JD → 系统自动生成面试问题 → 候选人链接进入。
 3. **复盘回放**（下期）：面试结束后回看视频、文字记录与评分依据。
 4. **语料维护**（下期）：管理员在后台直接增删改语料，或与语料 Agent 对话生成/改写语料，审核后入库生效。
+5. **调试排障**：开发者/管理员开启 Debug 模式 → 实时查看状态机流转、数据流各环节状态、通讯报文与延迟明细 → 定位问题。
 
 ---
 
@@ -105,6 +106,7 @@ journey
 | 评估报告 | 综合分、维度分、加分/风险、下一轮建议 | P0 | JSON + 页面展示，评分引用评分要点 |
 | 会话管理 | 单场面试创建、进行、结束、查询 | P0 | 内存态即可 |
 | 私有化部署配置 | GPU 服务器连接与路径配置集中在一个本地配置文件 | P0 | 含敏感信息，gitignore 不上传 GitHub |
+| Debug 模式 | 会话级开关，实时展示状态机流转、数据流环节状态、通讯信息、分段延迟 | P1 | 默认关闭，仅开发/内网使用 |
 
 ### 4.2 完整产品（第二阶段）
 
@@ -115,12 +117,36 @@ journey
 | 语料管理后台 | 语料列表、增删改、标签、生效/停用 | P1 |
 | 语料 Agent | 对话式生成语料、改写、相似度去重、入库建议 | P1 |
 | 语料版本与审核 | Agent 产出需人工确认后生效，支持回滚 | P2 |
+| Debug 可视化增强 | 状态机图渲染、通讯报文详情、延迟瀑布图、历史会话回放式调试 | P2 |
 | 用户体系 | 候选人/HR 账号、权限 | P1 |
 | 面试记录 | 视频回放、文字记录、评分历史 | P1 |
 | 管理后台 | 岗位配置、面试监控、数据看板 | P1 |
 | 多并发 | 支持 N 路同时面试 | P1 |
 | 企业部署 | 私有 GPU 集群、SSO、审计日志 | P2 |
 | 全视频生成 | 面试官主体由视频生成模型驱动 | P2 |
+
+### 4.3 Debug 模式详细说明
+
+Debug 模式是面向开发者/管理员的会话级开关，开启后在面试房间旁展示调试面板，不改变面试流程本身。
+
+**面板内容（MVP）**：
+
+| 区域 | 展示内容 |
+|------|----------|
+| 状态机视图 | 当前节点高亮 + 流转历史（`Created → Opening → Listening → Thinking → Speaking → ...`，含每次流转的时间与原因） |
+| 数据流视图 | ASR → LLM → RAG → TTS → 数字人 各环节实时状态（进行中/完成/失败）与耗时 |
+| 通讯信息 | SSE 事件流、LLM 请求/响应摘要、LiveTalking 调用（/human、/interrupt_talk）、Qdrant 检索记录 |
+| 延迟明细 | 每轮分段耗时：ASR / LLM 首 token / TTS / 渲染，超预算标红 |
+| RAG 明细 | 每轮检索的 query、命中语料（id、score、kind）、注入的 prompt 块 |
+| 原始日志 | 截断的 prompt、异常堆栈摘要、token 用量 |
+
+**交互与约束**：
+- 会话创建时 `debug=true` 或面试中 `POST /api/sessions/{id}/debug` 随时开关
+- 面板为侧边抽屉，可折叠；候选人视角（分享链接）永远看不到
+- 通讯报文中的密钥、凭证一律打码
+- Debug 事件不进对话历史，不影响评估
+
+**二期增强**：状态机图图形化渲染（Mermaid/流程图）、延迟瀑布图、历史会话回放式调试（按时间轴重放事件流）。
 
 ---
 
@@ -138,6 +164,8 @@ journey
 | 可用性 | 单场面试成功率 | > 99% |
 | 安全 | 对话数据 | 本地/私有部署，不出内网 |
 | 安全 | 部署配置与凭证 | `deploy/server.conf` 等敏感配置 gitignore，不进仓库 |
+| 安全 | Debug 模式 | 默认关闭；仅内网/管理员可开启；通讯信息脱敏（密钥打码） |
+| 性能 | Debug 开销 | 开启时关键路径延迟增加 < 5%，关闭时零开销 |
 | 兼容 | 浏览器 | Chrome / Edge 最新版 |
 
 ---
@@ -280,6 +308,7 @@ sequenceDiagram
 | POST | `/offer` 或 `/whep` | WebRTC 信令（LiveTalking） |
 | GET/POST/PUT/DELETE | `/api/corpus` | 语料管理（第二阶段），`kind`: question/rubric/knowledge/case |
 | POST | `/api/corpus/agent` | 语料 Agent 对话，返回建议草稿（第二阶段） |
+| POST | `/api/sessions/{id}/debug` | 开关会话 Debug 模式：`{"enabled": true}` |
 
 注：`POST /api/sessions/{id}/chat` 对外契约不变，内部流程在 LLM 调用前注入 RAG 检索结果。
 
@@ -293,6 +322,16 @@ sequenceDiagram
 | `error` | S→C | 错误信息 |
 | `audio` | S→C | TTS 音频流（可选） |
 | `video` | S→C | WebRTC 视频流 |
+
+Debug 模式开启后追加以下事件（仅 Debug，不对正常面试产生影响）：
+
+| 事件 | 方向 | 说明 |
+|------|------|------|
+| `state_change` | S→C | 状态机流转：`{from, to, reason, at}` |
+| `retrieval` | S→C | RAG 检索详情：`{query, kinds, hits[{id, score}], took_ms}` |
+| `comm` | S→C | 对外通讯记录：`{target: llm/livetalking/qdrant/tts, action, took_ms, status}`，报文摘要脱敏 |
+| `latency` | S→C | 本轮分段延迟：`{asr_ms, llm_first_token_ms, tts_ms, render_ms}` |
+| `debug_log` | S→C | 其他调试信息（截断的 prompt 块、异常堆栈摘要等） |
 
 ---
 
