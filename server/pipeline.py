@@ -62,7 +62,8 @@ class Pipeline:
                 self._sessions.transition(session, SessionState.OPENING, reason="kickoff")
                 async for event in self._speak(session, self._engine.opening(session)):
                     yield event
-                self._back_to_listening(session, reason="opening_done")
+                async for event in self._finish_listening(session, reason="opening_done"):
+                    yield event
                 return
 
             if text:
@@ -79,11 +80,20 @@ class Pipeline:
 
             async for event in self._speak(session, self._engine.next_turn(session)):
                 yield event
-            self._back_to_listening(session, reason="turn_done")
+            async for event in self._finish_listening(session, reason="turn_done"):
+                yield event
 
     def _back_to_listening(self, session: InterviewSession, *, reason: str) -> None:
         if session.can_transition(SessionState.LISTENING):
             self._sessions.transition(session, SessionState.LISTENING, reason=reason)
+
+    async def _finish_listening(
+        self, session: InterviewSession, *, reason: str
+    ) -> AsyncIterator[Event]:
+        """回到 Listening，并把本次流转的 Debug 事件挂回同一条 SSE。"""
+        self._back_to_listening(session, reason=reason)
+        for event in self._drain(session):
+            yield event
 
     # -- 说话（流式 + 分句推送数字人）-------------------------------------
 

@@ -269,20 +269,23 @@ class ChatLLM(Protocol):
     async def health(self) -> HealthStatus: ...
 
 
-_MOCK_REPLIES = [
-    "你好，我是今天的面试官。我们大概聊四十分钟，先从项目开始。请先简单介绍一下你最近负责的系统。",
+_MOCK_OPENING = "你好，我是今天的面试官。我们大概聊四十分钟，先从项目开始。请先简单介绍一下你最近负责的系统。"
+_MOCK_WRAP = "感谢你的分享。后续我们会内部讨论，一周内给你结果。你有什么想问我的吗？"
+_MOCK_FOLLOWUPS = [
     "你提到这个系统，当时的流量和数据量具体是多少？",
     "明白了。那你为什么选择现在这套方案，而不是更简单的替代？",
     "好的。请再说一个你在这个项目里踩过的坑，以及后来怎么防复发。",
-    "感谢你的分享。后续我们会内部讨论，一周内给你结果。你有什么想问我的吗？",
 ]
 
 
 class MockLLM:
-    """本地前端联调：按脚本逐字流式吐字，不访问真实模型。"""
+    """本地前端联调：按脚本逐字流式吐字，不访问真实模型。
+
+    按最后一条用户指令选开场/追问/收尾，避免多会话共享计数器导致串台。
+    """
 
     def __init__(self) -> None:
-        self._i = 0
+        self._follow = 0
 
     async def stream(
         self,
@@ -291,13 +294,22 @@ class MockLLM:
         max_tokens: int = 512,
         temperature: float = 0.7,
     ) -> AsyncIterator[tuple[str, str]]:
-        _ = messages, max_tokens, temperature
-        reply = _MOCK_REPLIES[min(self._i, len(_MOCK_REPLIES) - 1)]
-        self._i += 1
+        _ = max_tokens, temperature
+        reply = self._pick_reply(messages)
         yield "thinking", ""
         for char in reply:
             await asyncio.sleep(0.012)
             yield "delta", char
+
+    def _pick_reply(self, messages: list[dict[str, str]]) -> str:
+        last = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+        if "现在开始面试" in last:
+            return _MOCK_OPENING
+        if "面试轮次已到" in last:
+            return _MOCK_WRAP
+        reply = _MOCK_FOLLOWUPS[self._follow % len(_MOCK_FOLLOWUPS)]
+        self._follow += 1
+        return reply
 
     async def complete_json(
         self,

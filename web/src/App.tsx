@@ -50,6 +50,7 @@ export default function App() {
   const [error, setError] = useState("");
   const rtc = useWebRTC();
   const sessionRef = useRef("");
+  const inFlightRef = useRef(false);
   const skipRtc = rtc.skip;
   const connectRtc = rtc.connect;
 
@@ -108,6 +109,8 @@ export default function App() {
 
   const run = useCallback(
     async (payload: { text?: string; kickoff?: boolean; end?: boolean }) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       setBusy(true);
       setError("");
       try {
@@ -115,6 +118,7 @@ export default function App() {
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
+        inFlightRef.current = false;
         setBusy(false);
         setThinking(false);
       }
@@ -123,8 +127,14 @@ export default function App() {
   );
 
   const start = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setBusy(true);
     setError("");
+    setTurns([]);
+    setDebugEvents([]);
+    setStreaming("");
+    setThinking(false);
     try {
       const info = await createSession(config);
       sessionRef.current = info.session_id;
@@ -137,19 +147,23 @@ export default function App() {
         setDebugEvents(history.events.slice(-500));
       }
       if (!meta?.avatar.ok) skipRtc();
+      // kickoff 走同一把 inFlight 锁：先释放再交给 run
+      inFlightRef.current = false;
       await run({ kickoff: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      inFlightRef.current = false;
       setBusy(false);
     }
   }, [config, meta, run, skipRtc]);
 
   const submit = useCallback(
     (text: string) => {
+      if (inFlightRef.current || busy) return;
       setTurns((t) => [...t, { role: "candidate", text }]);
       void run({ text });
     },
-    [run],
+    [busy, run],
   );
 
   const speech = useSpeech(submit);
