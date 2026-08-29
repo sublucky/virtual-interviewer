@@ -8,7 +8,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: backend, changeOrigin: true },
+      "/api": {
+        target: backend,
+        changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
+      },
     },
   },
   build: { outDir: "dist" },

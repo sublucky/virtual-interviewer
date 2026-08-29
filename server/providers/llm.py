@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Protocol
 
 from openai import APIError, AsyncOpenAI
 
@@ -244,3 +245,91 @@ def _parse_json(raw: str) -> dict[str, Any]:
     if start == -1 or end <= start:
         raise LLMError(f"模型未返回 JSON：{text[:240]}")
     return json.loads(text[start : end + 1])
+
+
+class ChatLLM(Protocol):
+    """面试引擎 / 评估 / 语料 Agent 共用的最小接口，便于 mock 替换。"""
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[tuple[str, str]]: ...
+
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1800,
+        temperature: float = 0.3,
+    ) -> dict[str, Any]: ...
+
+    async def health(self) -> HealthStatus: ...
+
+
+_MOCK_REPLIES = [
+    "你好，我是今天的面试官。我们大概聊四十分钟，先从项目开始。请先简单介绍一下你最近负责的系统。",
+    "你提到这个系统，当时的流量和数据量具体是多少？",
+    "明白了。那你为什么选择现在这套方案，而不是更简单的替代？",
+    "好的。请再说一个你在这个项目里踩过的坑，以及后来怎么防复发。",
+    "感谢你的分享。后续我们会内部讨论，一周内给你结果。你有什么想问我的吗？",
+]
+
+
+class MockLLM:
+    """本地前端联调：按脚本逐字流式吐字，不访问真实模型。"""
+
+    def __init__(self) -> None:
+        self._i = 0
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[tuple[str, str]]:
+        _ = messages, max_tokens, temperature
+        reply = _MOCK_REPLIES[min(self._i, len(_MOCK_REPLIES) - 1)]
+        self._i += 1
+        yield "thinking", ""
+        for char in reply:
+            await asyncio.sleep(0.012)
+            yield "delta", char
+
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1800,
+        temperature: float = 0.3,
+    ) -> dict[str, Any]:
+        _ = messages, max_tokens, temperature
+        return {
+            "overall": 72,
+            "recommendation": "lean_hire",
+            "level_guess": "高级工程师",
+            "dimensions": [
+                {"name": "技术深度", "score": 4, "note": "能讲清取舍，但量化证据偏少"},
+                {"name": "工程实践", "score": 3, "note": "有规范意识，落地细节可再追"},
+                {"name": "问题解决", "score": 4, "note": "排查路径清楚"},
+                {"name": "沟通表达", "score": 4, "note": "结构完整"},
+                {"name": "岗位匹配", "score": 3, "note": "本场覆盖面一般"},
+            ],
+            "strengths": ["能量化问题规模", "有复盘意识"],
+            "risks": ["分布式场景本场未覆盖"],
+            "evidence": [{"quote": "流量大概三千", "why": "说明有真实容量认知"}],
+            "next_round_focus": ["分布式事务与一致性"],
+            "summary": "基础扎实，深度尚可，建议进入下一轮。",
+        }
+
+    async def health(self) -> HealthStatus:
+        return HealthStatus(ok=True, extra={"provider": "mock", "model": "mock-interviewer"})
+
+
+def build_llm(settings: LLMSettings) -> ChatLLM:
+    if settings.provider == "mock":
+        return MockLLM()
+    return LLMClient(settings)

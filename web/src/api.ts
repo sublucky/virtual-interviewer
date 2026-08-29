@@ -1,4 +1,11 @@
-import type { InterviewConfig, Report, SessionInfo, StreamEvent } from "./types";
+import type {
+  DebugEvent,
+  InterviewConfig,
+  Report,
+  ServiceMeta,
+  SessionInfo,
+  StreamEvent,
+} from "./types";
 
 const json = { "Content-Type": "application/json" };
 
@@ -8,7 +15,7 @@ async function parse<T>(resp: Response): Promise<T> {
 }
 
 export async function fetchMeta() {
-  return parse<Record<string, any>>(await fetch("/api/meta"));
+  return parse<ServiceMeta>(await fetch("/api/meta"));
 }
 
 export async function createSession(config: InterviewConfig) {
@@ -27,6 +34,12 @@ export async function toggleDebug(sessionId: string, enabled: boolean) {
   );
 }
 
+export async function fetchDebugHistory(sessionId: string) {
+  return parse<{ enabled: boolean; events: DebugEvent[] }>(
+    await fetch(`/api/sessions/${sessionId}/debug/history`),
+  );
+}
+
 export async function fetchReport(sessionId: string) {
   return parse<{ ready: boolean; report?: Report }>(
     await fetch(`/api/sessions/${sessionId}/report`),
@@ -41,6 +54,24 @@ export async function openRtc(sessionId: string, offerSdp: string): Promise<stri
   });
   if (!resp.ok) throw new Error(`数字人连接失败：${await resp.text()}`);
   return resp.text();
+}
+
+export function reportFromEvent(event: StreamEvent): Report | null {
+  if (event.event !== "report") return null;
+  const { event: _kind, ...rest } = event;
+  return rest as Report;
+}
+
+function emitFrame(frame: string, onEvent: (event: StreamEvent) => void) {
+  for (const raw of frame.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("data:")) continue;
+    try {
+      onEvent(JSON.parse(line.slice(5).trim()) as StreamEvent);
+    } catch {
+      // 半包或非 JSON 心跳，等下一帧
+    }
+  }
 }
 
 /**
@@ -70,14 +101,7 @@ export async function streamTurn(
     buffer += decoder.decode(value, { stream: true });
     const frames = buffer.split("\n\n");
     buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const line = frame.trim();
-      if (!line.startsWith("data:")) continue;
-      try {
-        onEvent(JSON.parse(line.slice(5).trim()) as StreamEvent);
-      } catch {
-        // 忽略半包，等下一帧
-      }
-    }
+    for (const frame of frames) emitFrame(frame, onEvent);
   }
+  if (buffer.trim()) emitFrame(buffer, onEvent);
 }

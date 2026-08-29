@@ -17,6 +17,28 @@ export interface SessionInfo {
   rounds: number;
 }
 
+export interface HealthStatus {
+  ok: boolean;
+  detail: string;
+  extra: Record<string, unknown>;
+}
+
+export interface RolePreset {
+  role: string;
+  style: InterviewStyle;
+  rounds: number;
+}
+
+export interface ServiceMeta {
+  llm: HealthStatus;
+  avatar: HealthStatus;
+  vector: HealthStatus;
+  embedding: { provider: string; dim: number };
+  llm_provider: string;
+  debug_default: boolean;
+  presets: RolePreset[];
+}
+
 export interface Report {
   overall: number;
   recommendation: string;

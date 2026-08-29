@@ -28,6 +28,8 @@ def _resolve(path: str) -> Path:
 
 @dataclass(frozen=True)
 class LLMSettings:
+    # mock：本地前端联调，不请求真实模型
+    provider: str = field(default_factory=lambda: _env("LLM_PROVIDER", "openai").lower())
     api_base: str = field(default_factory=lambda: _env("LLM_API_BASE", "http://127.0.0.1:8000/v1").rstrip("/"))
     api_key: str = field(default_factory=lambda: _env("LLM_API_KEY") or _env("DASHSCOPE_API_KEY") or "not-needed")
     model: str = field(default_factory=lambda: _env("LLM_MODEL", "deepseek-v4-flash-0731"))

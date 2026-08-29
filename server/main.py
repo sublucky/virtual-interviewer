@@ -23,7 +23,7 @@ from server.models import CorpusEntry, CorpusStatus, InterviewConfig
 from server.pipeline import Pipeline
 from server.providers.avatar import LiveTalkingAvatar
 from server.providers.embedding import build_embedding
-from server.providers.llm import LLMClient
+from server.providers.llm import build_llm
 from server.rag.retriever import Retriever
 from server.rag.store import VectorStore
 from server.session import InterviewSession, SessionRepository
@@ -36,7 +36,7 @@ class Container:
     def __init__(self) -> None:
         self.debug = DebugEmitter(default_enabled=settings.debug_default)
         self.storage = Storage(settings.sqlite_path)
-        self.llm = LLMClient(settings.llm)
+        self.llm = build_llm(settings.llm)
         self.embedding = build_embedding(
             settings.rag, llm_api_key=settings.llm.api_key, llm_api_base=settings.llm.api_base
         )
@@ -160,7 +160,13 @@ async def meta(ctx: Ctx) -> dict[str, Any]:
             "provider": settings.rag.embedding_provider,
             "dim": settings.rag.embedding_dim,
         },
+        "llm_provider": settings.llm.provider,
         "debug_default": settings.debug_default,
+        "presets": [
+            {"role": "后端工程师", "style": "probe", "rounds": 8},
+            {"role": "前端工程师", "style": "probe", "rounds": 8},
+            {"role": "通用", "style": "gentle", "rounds": 6},
+        ],
     }
 
 

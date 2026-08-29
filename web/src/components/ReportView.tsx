@@ -23,7 +23,9 @@ export function ReportView({ report, onRestart }: { report: Report; onRestart: (
       <p className="summary">{report.summary}</p>
 
       <div className="dimensions">
-        {report.dimensions.map((d) => (
+        {report.dimensions
+          .filter((d) => d.name.trim())
+          .map((d) => (
           <div key={d.name} className="dimension">
             <div className="dimension-head">
               <span>{d.name}</span>
