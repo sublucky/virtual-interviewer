@@ -744,50 +744,71 @@ flowchart LR
 
 ---
 
-## 10. 代码结构（建议）
+## 10. 代码结构（现状）
+
+以下为已落地的骨架结构。标 ○ 的是占位实现（接口已定、待接入），其余已可运行。
 
 ```
 virtual-interviewer/
 ├── REQUIREMENTS.md
 ├── ARCHITECTURE.md
-├── docker-compose.yml
+├── README.md
+├── Makefile                     # venv / dev / web / smoke / check / compose
+├── Dockerfile                   # 前端构建 + 后端运行（多阶段）
+├── docker-compose.yml           # app + qdrant，GPU 服务走 --profile gpu
+├── requirements.txt
+├── .env.example                 # 环境变量模板（.env 不入库）
 ├── server/                      # interview-server (FastAPI)
-│   ├── main.py                  # 入口 + 路由
-│   ├── config.py
-│   ├── session.py               # 状态机 + 存储
+│   ├── main.py                  # 接入层：路由 + Container 依赖装配
+│   ├── config.py                # 环境变量 → LLM/Avatar/RAG 分组配置
+│   ├── models.py                # 跨层共享 Pydantic 模型（含 DebugEvent）
+│   ├── session.py               # 会话状态机 TRANSITIONS + SessionRepository
+│   ├── storage.py               # SQLite：会话/消息/报告/语料元数据
+│   ├── debug.py                 # DebugEmitter：事件总线 + 脱敏 + 环形缓冲
+│   ├── pipeline.py              # 流式管道：切句/调度/打断/Debug 搭车
 │   ├── interview/
+│   │   ├── prompts.py           # prompt 模板（含口播约束与检索注入块）
 │   │   ├── engine.py            # 流程引擎（开场/追问/收束）
-│   │   ├── prompts.py           # prompt 模板（含检索注入块）
 │   │   └── evaluator.py         # 评估引擎
 │   ├── rag/
-│   │   ├── retriever.py         # 检索编排：查询构造/预取/防重题
-│   │   ├── embedding.py         # EmbeddingClient：bge-m3 / 百炼
-│   │   └── store.py             # VectorStore：Qdrant 实现
+│   │   ├── store.py             # VectorStore：Qdrant（远程 / 内嵌本地）
+│   │   └── retriever.py         # 检索编排：查询构造/防重题/超时降级
 │   ├── corpus/
-│   │   ├── manager.py           # 语料 CRUD + 状态机 + 审核流
-│   │   ├── agent.py             # 语料 Agent（二期）
-│   │   └── seed/                # 5 岗位初始题库 YAML（MVP 入库脚本）
-│   ├── debug.py                 # DebugEmitter：事件总线 + 脱敏 + 环形缓冲
-│   ├── providers/
-│   │   ├── llm.py               # LLMClient：vLLM / 百炼降级
-│   │   ├── asr.py               # ASREngine
-│   │   ├── tts.py               # TTSEngine
-│   │   ├── avatar.py            # AvatarRenderer：LiveTalking HTTP 客户端
-│   │   └── videogen.py          # VideoGenerator
-│   └── pipeline.py              # 流式管道：切句/调度/打断
+│   │   ├── manager.py           # 语料 CRUD + 状态机 + 种子导入
+│   │   ├── agent.py             # 语料 Agent（产出强制落 draft）
+│   │   └── seed/*.yaml          # 初始题库与评分要点
+│   └── providers/               # 外部 AI 能力，可整体替换
+│       ├── llm.py               # LLMClient：vLLM / 降级端点 / 熔断
+│       ├── embedding.py         # EmbeddingClient：hash / bge-m3 / 百炼
+│       ├── avatar.py            # AvatarRenderer：LiveTalking HTTP 客户端
+│       ├── voice.py             # ○ ASREngine / TTSEngine / RealtimeVoice 抽象
+│       └── videogen.py          # ○ VideoGenerator（空实现，用静态背景）
 ├── web/                         # 前端 (React + Vite)
 │   └── src/
-│       ├── pages/               # Setup / Room / Report / CorpusAdmin(二期)
-│       ├── components/
-│       │   └── DebugPanel.tsx   # 调试抽屉：状态机/数据流/通讯/延迟/RAG/日志
-│       ├── rtc.ts               # WHEP 拉流
-│       └── api.ts               # REST + SSE
+│       ├── App.tsx              # setup / interview / report 三态编排
+│       ├── api.ts               # REST + SSE（fetch 流式解析）
+│       ├── types.ts             # 与 server/models.py 对齐的类型
+│       ├── hooks/
+│       │   ├── useWebRTC.ts     # WHEP 拉流
+│       │   └── useSpeech.ts     # 浏览器 ASR（Web Speech API）
+│       └── components/
+│           ├── SetupForm.tsx
+│           ├── InterviewStage.tsx
+│           ├── ReportView.tsx
+│           └── DebugPanel.tsx   # 状态机/检索/通讯/延迟/日志 五类视图
+├── scripts/
+│   └── smoke.py                 # 假 LLM 跑通全链路自检，无需 GPU
 └── deploy/
     ├── server.conf.example      # 部署配置模板（入库）
-    ├── server.conf              # 真实配置（gitignore，不入库）
-    ├── livetalking/             # LiveTalking 镜像构建
-    └── caddy/                   # 反代配置
+    └── server.conf              # 真实配置（gitignore，不入库）
 ```
+
+与早期设计的两处调整：
+
+- `EmbeddingClient` 归入 `providers/` 而非 `rag/`：它是可替换的外部能力，
+  与 `rag/` 里的检索策略是不同关注点。
+- `asr.py` / `tts.py` 合并为 `voice.py`：MVP 下 ASR 在浏览器、TTS 在 LiveTalking 内部，
+  服务端只需要把演进接口钉住，拆两个文件都是空壳。
 
 ---
 

@@ -1,0 +1,44 @@
+# 通用行为面 / 开场收尾语料，跨岗位复用
+defaults:
+  role: 通用
+  source: import
+  status: active
+
+entries:
+  - id: seed-gen-project-deep
+    kind: question
+    tags: [项目, STAR, 行为面]
+    content: 请挑一个你主导的项目，讲清你的角色、最难的技术决策，以及你怎么验证这个决策是对的。
+    rubric: |
+      及格：能讲清做了什么；
+      优秀：有明确取舍理由、量化的验证指标、以及事后复盘。
+
+  - id: seed-gen-conflict
+    kind: question
+    tags: [协作, 冲突, 行为面]
+    content: 讲一次你和同事在技术方案上强烈分歧的经历，最后怎么收敛的？
+    rubric: |
+      及格：陈述事实；
+      优秀：体现出用数据/试验收敛分歧，而非靠职级或情绪。
+
+  - id: seed-gen-failure
+    kind: question
+    tags: [复盘, 故障, 行为面]
+    content: 讲一个你造成或参与处理的线上故障，根因是什么，之后做了什么防复发的改动？
+    rubric: |
+      及格：能说清现象与处理；
+      优秀：定位到真正根因，且落地了机制性改进（监控/流程/架构）。
+
+  - id: seed-gen-followup-policy
+    kind: knowledge
+    tags: [追问策略, 面试官技巧]
+    content: |
+      追问策略：候选人回答空泛时，按「具体场景 → 具体数字 → 具体取舍 → 具体结果」逐层下探。
+      每次只问一个问题；候选人明显答不上来时换方向，不要连续三次追问同一点。
+
+  - id: seed-gen-closing
+    kind: knowledge
+    tags: [收尾, 面试官技巧]
+    content: |
+      收尾话术：先感谢并简短总结候选人的亮点，然后留出反问时间，最后说明后续流程与时间预期。
+      不要在收尾时给出录用结论或分数。

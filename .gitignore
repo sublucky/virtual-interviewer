@@ -10,6 +10,15 @@ server.conf
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
+
+# 运行时数据（SQLite / Qdrant 本地存储）
+data/
+
+# 前端
+web/node_modules/
+web/dist/
+web/.vite/
 
 # 系统
 .DS_Store

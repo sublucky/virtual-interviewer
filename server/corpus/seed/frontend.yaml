@@ -1,0 +1,28 @@
+# 前端工程师种子语料
+defaults:
+  kind: question
+  role: 前端工程师
+  source: import
+  status: active
+
+entries:
+  - id: seed-fe-render
+    tags: [浏览器, 渲染, 性能]
+    content: 首屏加载慢，你会怎么定位瓶颈？说说你实际优化过的一个案例和收益。
+    rubric: |
+      及格：知道看 Network/Performance 面板；
+      优秀：能按 LCP/FCP/TBT 指标拆解，区分网络、解析、渲染阶段，并有量化收益。
+
+  - id: seed-fe-state
+    tags: [React, 状态管理, 架构]
+    content: 一个页面里有多个组件需要共享且频繁变化的状态，你怎么设计避免无谓重渲染？
+    rubric: |
+      及格：知道提升状态、用 context；
+      优秀：能说清 context 的重渲染代价、选择性订阅、memo/useMemo 的适用边界。
+
+  - id: seed-fe-realtime
+    tags: [WebRTC, WebSocket, 实时]
+    content: 做实时音视频页面时，你怎么处理弱网下的体验降级？
+    rubric: |
+      及格：提到重连；
+      优秀：讲清连接状态机、码率自适应、音频优先、以及超时与用户提示策略。

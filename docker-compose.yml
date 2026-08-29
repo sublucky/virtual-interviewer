@@ -1,0 +1,55 @@
+# 本地/私有化 MVP 编排（架构 §6）
+# LLM 与 LiveTalking 需要 GPU，通常单独部署在 GPU 服务器上，
+# 本文件默认只起「应用 + 向量库」，通过 .env 指向远端 GPU 服务。
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8090}:8090"
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8090
+      QDRANT_URL: http://qdrant:6333
+      SQLITE_PATH: /data/interview.db
+    volumes:
+      - app-data:/data
+    depends_on:
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+  # GPU 节点服务：在有 GPU 的机器上用 --profile gpu 启动
+  vllm:
+    image: vllm/vllm-openai:latest
+    profiles: ["gpu"]
+    command:
+      - --model=${VLLM_MODEL:-deepseek-ai/DeepSeek-V4-Flash}
+      - --served-model-name=${LLM_MODEL:-deepseek-v4-flash-0731}
+      - --port=8000
+    ports:
+      - "${VLLM_PORT:-8000}:8000"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  qdrant-data:
+  hf-cache:
