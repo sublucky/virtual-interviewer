@@ -1,9 +1,9 @@
 # 虚拟面试官系统架构设计
 
-> 版本：v0.2（与 [REQUIREMENTS.md](REQUIREMENTS.md) v0.3 对齐，新增 RAG 检索、语料管理、私有化部署配置）  
+> 版本：v0.3（与 [REQUIREMENTS.md](REQUIREMENTS.md) v0.4 对齐，新增 Debug 子系统）  
 > 日期：2026-08-29  
 > 状态：待评审  
-> 替代：v0.1（无 RAG 版本，见 git 历史）
+> 替代：v0.2（无 Debug 模式版本，见 git 历史）
 
 ---
 
@@ -24,6 +24,7 @@
 | 状态显式化 | 面试会话用状态机管理，禁止隐式流转 | `SessionStateMachine` |
 | 可打断 | 候选人可随时打断面试官 | VAD 检测 → 清空 TTS/播报队列 → 保留半句上下文 |
 | 配置不出库 | 私有化部署凭证只在本地配置文件 | `deploy/server.conf` gitignore，仓库只存模板 |
+| 可调试 | 关键链路事件可观测，开关零开销 | `DebugEmitter` 事件总线，关闭时为空操作 |
 | 单机起步，分布就绪 | MVP 单机 Docker Compose，接口按服务边界划分 | 后期拆 K8s 不改业务代码 |
 
 ---
@@ -36,6 +37,7 @@
 flowchart TB
     subgraph L1 [接入层]
         Web[Web 前端<br/>面试房间]
+        DebugUI[Debug 面板<br/>前端抽屉]
         Admin[管理后台<br/>语料管理 - 二期]
         WHEP[WHEP 信令<br/>WebRTC 拉流]
         API[REST + SSE<br/>会话/对话/报告/语料]
@@ -48,6 +50,7 @@ flowchart TB
         Pipe[流式管道<br/>切句/调度/打断]
         Corpus[语料管理<br/>CRUD + 审核流]
         CAgent[语料 Agent<br/>生成/改写/去重 - 二期]
+        DBG[DebugEmitter<br/>事件总线 + 环形缓冲]
     end
 
     subgraph L3 [能力抽象层 - Provider Interfaces]
@@ -84,9 +87,15 @@ flowchart TB
 
     Web --> WHEP --> LT
     Web --> API --> SM
+    DebugUI --> API
     Admin --> API --> Corpus
     SM --> Flow --> Pipe
     Pipe --> LLMI & TTSI & AVI
+    SM --> DBG
+    Pipe --> DBG
+    Flow --> DBG
+    Eval --> DBG
+    DBG --> API
     Flow --> VS
     Eval --> LLMI
     Eval --> VS
@@ -152,6 +161,7 @@ stateDiagram-v2
 | `ReportView` | 评分条形图、加分风险、证据引用（含评分要点出处） | MVP |
 | `CorpusTable` | 语料列表、筛选（kind/role/tag/status）、增删改 | 二期 |
 | `CorpusAgentChat` | 与语料 Agent 对话，预览草稿、确认入库 | 二期 |
+| `DebugPanel` | 调试抽屉：状态机视图、数据流视图、通讯信息、延迟明细、RAG 明细、原始日志 | MVP（P1） |
 
 **与后端通道**：
 - 控制面：REST + SSE（`/api/*`）
@@ -169,6 +179,7 @@ FastAPI 应用，接口分组：
 | SSE | `POST /api/sessions/{id}/chat` | 候选人回答 → 流式返回面试官输出 | MVP |
 | REST | `POST /api/sessions/{id}/end` | 主动结束 | MVP |
 | REST | `POST /api/sessions/{id}/report` | 生成/获取评估报告 | MVP |
+| REST | `POST /api/sessions/{id}/debug` | 开关会话 Debug 模式：`{"enabled": true}` | MVP（P1） |
 | 代理 | `POST /rtc/offer` | 转发 WHEP 信令到 LiveTalking | MVP |
 | REST | `GET/POST/PUT/DELETE /api/corpus` | 语料 CRUD，按 `kind/role/tag/status` 筛选 | 二期 |
 | REST | `POST /api/corpus/{id}/review` | 语料审核：通过（active）/ 驳回（disabled） | 二期 |
@@ -184,6 +195,16 @@ SSE 事件协议（面试）：
 {"type": "interrupted"}                       // 候选人打断已生效
 {"type": "done", "turns": 5}                  // 本轮结束
 {"type": "error", "message": "..."}
+```
+
+Debug 模式开启后追加（仅 Debug，不进对话历史，不影响评估）：
+
+```json
+{"type": "state_change", "from": "Listening", "to": "Thinking", "reason": "收到回答", "at": "..."}
+{"type": "retrieval", "query": "...", "kinds": ["question"], "hits": [{"id": "...", "score": 0.83}], "took_ms": 45}
+{"type": "comm", "target": "llm", "action": "chat.completions", "took_ms": 380, "status": 200}
+{"type": "latency", "asr_ms": 300, "llm_first_token_ms": 400, "tts_ms": 300, "render_ms": 200}
+{"type": "debug_log", "message": "截断的 prompt 块 / 异常摘要 / token 用量"}
 ```
 
 ### 3.3 会话状态机
@@ -486,6 +507,50 @@ class VideoGenerator(Protocol):
 
 **后期切换全视频生成面试官**：实现 `AvatarRenderer` 接口的视频生成版本（逐帧/流式扩散），替换 LiveTalking 绑定即可，编排层不动。
 
+### 3.13 Debug 子系统（DebugEmitter）
+
+**职责**：采集关键链路事件，会话级开关，推送到前端调试面板；关闭时零开销。
+
+**架构**：
+
+```mermaid
+flowchart LR
+    SM[会话状态机] -->|state_change| E[DebugEmitter]
+    Pipe[流式管道] -->|comm/latency| E
+    Flow[流程引擎] -->|retrieval/debug_log| E
+    Eval[评估引擎] -->|debug_log| E
+    E --> F{会话 debug 开启?}
+    F -->|否| Drop[丢弃 - 空操作]
+    F -->|是| Mask[脱敏<br/>密钥/凭证打码]
+    Mask --> Ring[环形缓冲<br/>每会话最近 500 条]
+    Mask --> SSE[SSE 推送<br/>Debug 面板]
+```
+
+**核心设计**：
+
+```python
+class DebugEmitter(Protocol):
+    def emit(self, session_id: str, event: DebugEvent) -> None: ...
+    def set_enabled(self, session_id: str, enabled: bool) -> None: ...
+    def history(self, session_id: str) -> list[DebugEvent]: ...  # 环形缓冲
+```
+
+- **零开销**：未开启时 `emit` 是空操作（一个 bool 判断），满足关键路径开销 < 5%
+- **脱敏**：事件入缓冲前统一过 `mask_secrets()`（匹配 `sk-*`、token、密码字段打码）
+- **环形缓冲**：每会话保留最近 500 条，前端断线重连可拉 `history` 补齐
+- **事件来源**：
+  - 状态机：每次流转发 `state_change`（from/to/reason）
+  - 流式管道：每次对外调用发 `comm`（target/action/took_ms/status），每轮结束发 `latency`
+  - 流程引擎：每次检索发 `retrieval`（query/kinds/hits/took_ms）
+  - 全模块：异常与关键决策发 `debug_log`
+
+**前端 DebugPanel**（抽屉式，六个区域）：
+状态机视图（当前节点高亮 + 流转历史列表）/ 数据流视图（ASR→LLM→RAG→TTS→数字人 各环节状态灯 + 耗时）/ 通讯信息（事件流滚动列表）/ 延迟明细（每轮分段条形，超预算标红）/ RAG 明细（query + 命中语料卡片）/ 原始日志。
+
+MVP 用文字列表 + 简易条形；二期升级状态机图形渲染（Mermaid 实时高亮）与延迟瀑布图。
+
+**约束**：Debug 事件不进 `messages` 对话历史，不参与评估；候选人视角（分享链接）永不返回 debug 事件；二期管理端鉴权后仅管理员可开。
+
 ---
 
 ## 4. 延迟预算（MVP 关键路径）
@@ -644,7 +709,7 @@ volumes:
 | 稳定性 | 服务探活 | vLLM/LiveTalking/TTS/Qdrant 健康检查 |
 | 业务 | 会话事件 | 面试完成率、平均轮次、打断次数 |
 
-MVP：结构化日志（JSON）+ `/api/meta` 健康聚合；完整产品接 Prometheus + Grafana。
+MVP：结构化日志（JSON）+ `/api/meta` 健康聚合 + Debug 模式（§3.13，会话级实时事件）；完整产品接 Prometheus + Grafana。
 
 ---
 
@@ -658,6 +723,7 @@ MVP：结构化日志（JSON）+ `/api/meta` 健康聚合；完整产品接 Prom
 | 越权 | 会话 ID 为不可猜测 UUID；语料管理接口二期加管理员鉴权 |
 | 密钥 | LLM/TTS 密钥走环境变量，不进代码与日志 |
 | 部署凭证 | `deploy/server.conf` gitignore 保护，仓库只存空值模板；提交前 `git check-ignore` 验证 |
+| Debug 数据 | 事件入缓冲前统一脱敏（密钥/token 打码）；默认关闭；候选人视角不可见；二期仅管理员可开 |
 
 ---
 
@@ -701,6 +767,7 @@ virtual-interviewer/
 │   │   ├── manager.py           # 语料 CRUD + 状态机 + 审核流
 │   │   ├── agent.py             # 语料 Agent（二期）
 │   │   └── seed/                # 5 岗位初始题库 YAML（MVP 入库脚本）
+│   ├── debug.py                 # DebugEmitter：事件总线 + 脱敏 + 环形缓冲
 │   ├── providers/
 │   │   ├── llm.py               # LLMClient：vLLM / 百炼降级
 │   │   ├── asr.py               # ASREngine
@@ -712,6 +779,7 @@ virtual-interviewer/
 │   └── src/
 │       ├── pages/               # Setup / Room / Report / CorpusAdmin(二期)
 │       ├── components/
+│       │   └── DebugPanel.tsx   # 调试抽屉：状态机/数据流/通讯/延迟/RAG/日志
 │       ├── rtc.ts               # WHEP 拉流
 │       └── api.ts               # REST + SSE
 └── deploy/
@@ -738,15 +806,17 @@ virtual-interviewer/
 | 9 | 语料双写 SQLite + Qdrant | 管理列表不走向量库，检索不走业务库 | 单库（Qdrant 不擅长管理态查询） |
 | 10 | Agent 语料强制人工审核 | 防止低质语料污染题库 | Agent 直接入库（质量不可控） |
 | 11 | 部署凭证本地配置文件 + gitignore | 简单、与现有 distill_corpus 模式一致 | Vault 等密钥管理（MVP 过重） |
+| 12 | Debug 走会话内 SSE 而非独立通道 | 复用已有连接，事件与对话天然同序 | 独立 WebSocket（多一连接，排序需对齐） |
 
 ---
 
 ## 附录
 
 ### A. 与需求文档的映射
-- 功能需求 4.1（含 RAG 检索、语料初始化、私有化部署配置）→ 本文 §3.4/§3.5/§6.1
-- 功能需求 4.2（语料后台、语料 Agent、领域知识）→ 本文 §3.5、§9
-- 非功能需求 §5（检索延迟、命中率、配置安全）→ 本文 §4、§7、§8
+- 功能需求 4.1（含 RAG 检索、语料初始化、私有化部署配置、Debug 模式）→ 本文 §3.4/§3.5/§6.1/§3.13
+- 功能需求 4.2（语料后台、语料 Agent、领域知识、Debug 可视化增强）→ 本文 §3.5、§3.13、§9
+- 功能需求 4.3（Debug 面板六区域）→ 本文 §3.13
+- 非功能需求 §5（检索延迟、命中率、配置安全、Debug 开销与脱敏）→ 本文 §4、§7、§8
 - 风险 §11（检索质量、Agent 产出不稳）→ 本文 §3.4 降级、§3.5 审核流
 
 ### B. 参考
