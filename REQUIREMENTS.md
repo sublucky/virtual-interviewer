@@ -1,6 +1,6 @@
 # 虚拟面试官系统需求分析
 
-> 版本：v0.1（需求基线）  
+> 版本：v0.2（增加 RAG 与语料管理）  
 > 日期：2026-08-29  
 > 状态：待评审
 
@@ -17,13 +17,14 @@
 - 技术端：验证「实时视频生成 + 语音 + LLM」在严肃对话场景下的可用性。
 
 ### 1.3 范围
-- **本期（MVP）**：单岗位、单并发、完整面试流程（开场 → 问答 → 结束 → 评估）。
-- **下期（完整产品）**：多岗位、多并发、管理后台、数据沉淀、企业级部署。
+- **本期（MVP）**：单岗位、单并发、完整面试流程（开场 → 问答 → 结束 → 评估）；提问与评估基于 RAG 题库与评分要点检索。
+- **下期（完整产品）**：多岗位、多并发、管理后台、数据沉淀、企业级部署；RAG 扩展领域知识与面经语料，上线语料管理后台与语料 Agent。
 
 ### 1.4 非目标
 - 不替代真人终面，仅用于练习与初筛。
 - 不做简历自动解析（MVP 阶段手动粘贴）。
 - 不做实时视频生成的面试官主体（MVP 用 LiveTalking 数字人，视频生成仅做背景/情绪镜头）。
+- MVP 不做语料管理界面，语料以初始化脚本/配置文件方式入库。
 
 ---
 
@@ -40,6 +41,7 @@
 1. **模拟面试**：候选人选择岗位 → 粘贴简历 → 开始视频面试 → 获得评估报告。
 2. **岗位定制**（下期）：HR 上传 JD → 系统自动生成面试问题 → 候选人链接进入。
 3. **复盘回放**（下期）：面试结束后回看视频、文字记录与评分依据。
+4. **语料维护**（下期）：管理员在后台直接增删改语料，或与语料 Agent 对话生成/改写语料，审核后入库生效。
 
 ---
 
@@ -55,12 +57,31 @@ journey
     section 面试
       进入视频房间: 5: 候选人
       听面试官开场: 5: 候选人, 系统
+      检索题库与评分要点: 4: 系统
       语音/文字回答: 4: 候选人
       被追问与打断: 3: 候选人, 系统
     section 结束
       主动结束或超时: 3: 候选人
+      检索评分要点并评估: 4: 系统
       查看评估报告: 5: 候选人
       导出/分享报告: 4: 候选人
+```
+
+### 3.1 管理员旅程（下期）
+
+```mermaid
+journey
+    title 管理员语料维护旅程
+    section 准备
+      登录管理后台: 4: 管理员
+      选择语料库与岗位: 4: 管理员
+    section 维护
+      直接添加/编辑语料: 4: 管理员
+      或与语料Agent对话生成草稿: 5: 管理员, 系统
+      相似度去重与改写建议: 4: 系统
+    section 生效
+      人工审核确认: 5: 管理员
+      入库并生效: 5: 系统
 ```
 
 ---
@@ -79,7 +100,9 @@ journey
 | 语音输入 | 浏览器 Web Speech API 或本地 ASR | P0 | 支持打断 |
 | 语音输出 | TTS 合成面试官语音 | P0 | 支持打断 |
 | 面试逻辑 | LLM 驱动追问、收束、结束 | P0 | 基于 DeepSeek V4 Flash |
-| 评估报告 | 综合分、维度分、加分/风险、下一轮建议 | P0 | JSON + 页面展示 |
+| RAG 检索 | 提问前按岗位+简历+已问问题检索题库与评分要点，注入 LLM 上下文 | P0 | 不进关键路径，提前预取 |
+| 语料初始化 | 内置 5 个岗位的基础题库与评分要点 | P0 | 脚本/配置文件入库 |
+| 评估报告 | 综合分、维度分、加分/风险、下一轮建议 | P0 | JSON + 页面展示，评分引用评分要点 |
 | 会话管理 | 单场面试创建、进行、结束、查询 | P0 | 内存态即可 |
 
 ### 4.2 完整产品（第二阶段）
@@ -87,6 +110,10 @@ journey
 | 模块 | 需求 | 优先级 |
 |------|------|--------|
 | 多岗位题库 | 岗位 → 问题库 → 追问策略 | P1 |
+| 领域知识/面经语料 | 追问与评估时引用公司/业务背景、优秀回答范例 | P1 |
+| 语料管理后台 | 语料列表、增删改、标签、生效/停用 | P1 |
+| 语料 Agent | 对话式生成语料、改写、相似度去重、入库建议 | P1 |
+| 语料版本与审核 | Agent 产出需人工确认后生效，支持回滚 | P2 |
 | 用户体系 | 候选人/HR 账号、权限 | P1 |
 | 面试记录 | 视频回放、文字记录、评分历史 | P1 |
 | 管理后台 | 岗位配置、面试监控、数据看板 | P1 |
@@ -102,6 +129,9 @@ journey
 |------|------|------|
 | 延迟 | 语音输入到面试官开口 | < 1.5s（MVP），< 800ms（优化后） |
 | 延迟 | 视频口型同步 | < 200ms |
+| 延迟 | RAG 检索 | < 200ms，提问前预取，不进关键路径 |
+| 质量 | 语料检索命中率 | 提问引用题库命中率 > 90% |
+| 质量 | 评估一致性 | 评分与评分要点对齐，可人工复核 |
 | 并发 | MVP | 1 路 |
 | 并发 | 完整产品 | 50+ 路 |
 | 可用性 | 单场面试成功率 | > 99% |
@@ -131,6 +161,7 @@ flowchart TB
         Session[会话管理]
         Interview[面试逻辑引擎]
         Eval[评估引擎]
+        Corpus[语料管理<br/>后台 + Agent]
     end
 
     subgraph AI [AI 能力层]
@@ -139,23 +170,30 @@ flowchart TB
         TTS[语音合成]
         Avatar[LiveTalking 数字人]
         VideoGen[视频生成<br/>背景/情绪镜头]
+        RAG[RAG 检索服务<br/>Embedding + 向量库]
     end
 
     subgraph Infra [基础设施]
         GPU[GPU 服务器]
         Store[(面试记录)]
+        Vec[(向量库<br/>Qdrant)]
     end
 
     UI --> WS
     Mic --> ASR
     ASR --> Interview
+    Interview --> RAG
+    RAG --> Vec
     Interview --> LLM
     LLM --> TTS
     TTS --> Avatar
     VideoGen --> Avatar
     Avatar --> WS
     Interview --> Eval
+    Eval --> RAG
     Eval --> Store
+    Corpus --> RAG
+    Corpus --> LLM
 ```
 
 ### 6.2 模块职责
@@ -166,7 +204,9 @@ flowchart TB
 | 接入层 | 信令、音视频传输、会话控制 | WebRTC (WHEP) + WebSocket |
 | 会话管理 | 面试状态机、上下文缓存 | Python / Node |
 | 面试逻辑 | 问题生成、追问策略、收束 | Prompt 工程 + DeepSeek V4 Flash |
-| 评估引擎 | 结构化评分、报告生成 | LLM JSON 输出 |
+| 评估引擎 | 结构化评分、报告生成 | LLM JSON 输出 + 评分要点对齐 |
+| RAG 检索 | 题库/评分要点/领域知识/面经检索 | Qdrant + Embedding |
+| 语料管理 | 语料增删改查、Agent 辅助生成与去重 | 管理后台 + 语料 Agent |
 | ASR | 语音转文字 | 本地 Whisper / 浏览器 API |
 | TTS | 文字转语音 | Edge-TTS / 本地 TTS |
 | 数字人 | 口型同步、形象渲染 | LiveTalking |
@@ -180,6 +220,7 @@ sequenceDiagram
     participant C as 候选人
     participant F as 前端
     participant S as 会话服务
+    participant R as RAG检索
     participant L as LLM(vLLM)
     participant T as TTS
     participant A as LiveTalking
@@ -187,7 +228,9 @@ sequenceDiagram
 
     C->>F: 选择岗位 + 粘贴简历
     F->>S: 创建面试会话
-    S->>L: 构建 system prompt
+    S->>R: 检索题库与评分要点（岗位+简历）
+    R-->>S: 相关题目与评分要点
+    S->>L: 构建 system prompt + 检索结果
     L-->>S: 开场白
     S->>T: 合成语音
     T->>A: 驱动数字人
@@ -198,7 +241,9 @@ sequenceDiagram
     loop 问答
         C->>F: 语音/文字回答
         F->>S: 转发回答
-        S->>L: 追加对话历史
+        S->>R: 检索追问锚点与评分要点
+        R-->>S: 相关知识与范例
+        S->>L: 追加对话历史 + 检索结果
         L-->>S: 追问/收束
         S->>T: 合成语音
         T->>A: 驱动数字人
@@ -207,11 +252,15 @@ sequenceDiagram
 
     C->>F: 结束面试
     F->>S: 触发评估
+    S->>R: 检索各维度评分要点
+    R-->>S: 评分依据语料
     S->>L: 生成评估 JSON
     L-->>S: 结构化报告
     S-->>F: 返回报告
     F-->>C: 展示评估
 ```
+
+参与者说明：R = RAG 检索服务（含向量库）。
 
 ---
 
@@ -225,8 +274,12 @@ sequenceDiagram
 | POST | `/api/sessions` | 创建面试会话 |
 | GET | `/api/sessions/{id}` | 查询会话状态与记录 |
 | POST | `/api/sessions/{id}/chat` | 发送回答（SSE 流式返回） |
-| POST | `/api/sessions/{id}/report` | 生成评估报告 |
+| POST | `/api/sessions/{id}/report` | 生成评估报告（检索评分要点对齐） |
 | POST | `/offer` 或 `/whep` | WebRTC 信令（LiveTalking） |
+| GET/POST/PUT/DELETE | `/api/corpus` | 语料管理（第二阶段），`kind`: question/rubric/knowledge/case |
+| POST | `/api/corpus/agent` | 语料 Agent 对话，返回建议草稿（第二阶段） |
+
+注：`POST /api/sessions/{id}/chat` 对外契约不变，内部流程在 LLM 调用前注入 RAG 检索结果。
 
 ### 7.2 WebSocket / SSE 事件
 
@@ -286,6 +339,32 @@ sequenceDiagram
 }
 ```
 
+### 8.3 语料条目（RAG）
+
+```json
+{
+  "id": "uuid",
+  "kind": "question | rubric | knowledge | case",
+  "role": "backend",
+  "tags": ["分布式", "幂等"],
+  "content": "语料正文（题目/知识点/面经范例）",
+  "reference_answer": "参考答案（question 类可选）",
+  "rubric": "评分要点（question/case 类可选）",
+  "source": "manual | agent | import",
+  "status": "active | disabled",
+  "version": 3,
+  "updated_at": "2026-08-29T16:00:00Z"
+}
+```
+
+说明：
+- `kind=question`：面试题，可带参考答案与评分要点
+- `kind=rubric`：独立评分要点（按维度）
+- `kind=knowledge`：岗位/公司/业务领域知识
+- `kind=case`：优秀回答范例 / 面经
+- 向量 embedding 由向量库管理，不在业务表存储
+- Agent 产出的语料 `source=agent`，默认 `status=disabled`，人工审核后转 `active`
+
 ---
 
 ## 9. 技术选型与依赖
@@ -301,6 +380,9 @@ sequenceDiagram
 | TTS | Edge-TTS / 本地 TTS | 支持打断 |
 | 数字人 | LiveTalking (wav2lip/musetalk/ultralight) | 实时口型 |
 | 视频生成 | 可插拔（Veo / Kling / 自研扩散） | MVP 仅背景/情绪镜头 |
+| 向量库 | Qdrant（单机 Docker） | 完整产品可换 Milvus / pgvector |
+| Embedding | bge-m3（本地）或百炼 text-embedding | 统一 EmbeddingClient 接口 |
+| 语料 Agent | DeepSeek V4 Flash + 检索工具调用 | 产出需人工审核 |
 | 部署 | Docker Compose | 后期 K8s |
 
 ---
@@ -325,14 +407,18 @@ flowchart LR
         vLLM[vLLM<br/>DeepSeek V4 Flash]
         LiveTalking[LiveTalking<br/>数字人服务]
         App[FastAPI<br/>面试逻辑]
+        Qdrant[(Qdrant<br/>向量库)]
         VideoGen[视频生成<br/>背景/情绪]
     end
     Browser[候选人浏览器] -->|WebRTC| LiveTalking
     Browser -->|HTTP/SSE| App
     App --> vLLM
     App --> LiveTalking
+    App --> Qdrant
     App --> VideoGen
 ```
+
+注：Embedding 模型（bge-m3）可 CPU 运行，不新增 GPU 需求。
 
 ### 10.3 监控指标
 - LLM 首 token 延迟、吞吐
@@ -350,6 +436,8 @@ flowchart LR
 | 视频生成延迟高 | 破坏实时感 | MVP 仅做背景/情绪，主体用 LiveTalking |
 | 语音打断不自然 | 体验差 | 预留端到端实时语音接口 |
 | 评估主观性 | 候选人质疑 | 输出对话依据，允许人工复核 |
+| 检索质量差 | 提问跑偏、评估失准 | 评分要点强约束 prompt；检索结果人工可审；命中率纳入监控 |
+| 语料 Agent 产出不稳 | 低质语料污染题库 | Agent 产出默认停用，人工审核后生效；相似度去重 |
 | 多并发资源争抢 | 服务不稳定 | MVP 单并发，后期队列 + 限流 |
 
 ### 开放问题
@@ -357,6 +445,7 @@ flowchart LR
 2. 端到端实时语音（如 Qwen-Omni）是否值得在 MVP 后立刻接入？
 3. 企业级部署的合规与审计要求？
 4. 面试题库的建设与运营机制？
+5. 语料 Agent 的权限边界：可自动改写现有语料，还是只能产出新草稿？
 
 ---
 
