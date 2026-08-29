@@ -144,7 +144,7 @@ export function DebugPanel({
               <li key={`${event.at}-${i}`}>
                 <header>
                   <time>{event.at.slice(11, 23)}</time>
-                  <span>{event.took_ms}ms</span>
+                  <span>{String(event.took_ms)}ms</span>
                 </header>
                 <p className="query">{String(event.query ?? "")}</p>
                 <ul>

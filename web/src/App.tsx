@@ -7,6 +7,7 @@ import {
   streamTurn,
   toggleDebug,
 } from "./api";
+import { CorpusAdmin } from "./components/CorpusAdmin";
 import { DebugPanel } from "./components/DebugPanel";
 import { InterviewStage } from "./components/InterviewStage";
 import { ReportView } from "./components/ReportView";
@@ -22,7 +23,7 @@ import type {
   Turn,
 } from "./types";
 
-type Phase = "setup" | "interview" | "report";
+type Phase = "setup" | "interview" | "report" | "corpus";
 
 const EMPTY_CONFIG: InterviewConfig = {
   role: "后端工程师",
@@ -204,12 +205,29 @@ export default function App() {
   const enableRtc = Boolean(meta?.avatar.ok) && phase === "interview" && Boolean(sessionId);
 
   return (
-    <main className={debugOn && phase !== "setup" ? "app with-debug" : "app"}>
+    <main className={debugOn && phase !== "setup" && phase !== "corpus" ? "app with-debug" : "app"}>
       <div className="main-col">
         {error && <div className="error">{error}</div>}
 
         {phase === "setup" && (
-          <SetupForm busy={busy} meta={meta} config={config} onChange={patchConfig} onStart={() => void start()} />
+          <SetupForm
+            busy={busy}
+            meta={meta}
+            config={config}
+            onChange={patchConfig}
+            onStart={() => void start()}
+            onOpenCorpus={() => setPhase("corpus")}
+          />
+        )}
+
+        {phase === "corpus" && (
+          <CorpusAdmin
+            presets={meta?.presets ?? []}
+            onBack={() => {
+              setPhase("setup");
+              fetchMeta().then(setMeta).catch(() => undefined);
+            }}
+          />
         )}
 
         {phase === "interview" && (

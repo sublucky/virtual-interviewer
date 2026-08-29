@@ -1,4 +1,9 @@
 import type {
+  CorpusEntry,
+  CorpusKind,
+  CorpusMeta,
+  CorpusStats,
+  CorpusStatus,
   DebugEvent,
   InterviewConfig,
   Report,
@@ -72,6 +77,89 @@ function emitFrame(frame: string, onEvent: (event: StreamEvent) => void) {
       // 半包或非 JSON 心跳，等下一帧
     }
   }
+}
+
+// --------------------------------------------------------------------------
+// 语料管理
+// --------------------------------------------------------------------------
+
+export async function fetchCorpusStats() {
+  return parse<CorpusStats>(await fetch("/api/corpus/stats"));
+}
+
+export async function listCorpus(params: {
+  role?: string;
+  kind?: string;
+  status?: string;
+  limit?: number;
+  withContent?: boolean;
+}) {
+  const q = new URLSearchParams();
+  if (params.role) q.set("role", params.role);
+  if (params.kind) q.set("kind", params.kind);
+  if (params.status) q.set("status", params.status);
+  if (params.limit) q.set("limit", String(params.limit));
+  if (params.withContent) q.set("with_content", "true");
+  const suffix = q.toString() ? `?${q}` : "";
+  return parse<{ items: CorpusMeta[] }>(await fetch(`/api/corpus${suffix}`));
+}
+
+export async function getCorpus(id: string) {
+  return parse<{ entry: CorpusEntry }>(await fetch(`/api/corpus/${encodeURIComponent(id)}`));
+}
+
+export async function upsertCorpus(entries: CorpusEntry[]) {
+  return parse<{ upserted: number }>(
+    await fetch("/api/corpus", { method: "POST", headers: json, body: JSON.stringify({ entries }) }),
+  );
+}
+
+export async function setCorpusStatus(ids: string[], status: CorpusStatus) {
+  return parse<{ updated: number }>(
+    await fetch("/api/corpus/status", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ ids, status }),
+    }),
+  );
+}
+
+export async function deleteCorpus(ids: string[]) {
+  return parse<{ deleted: number }>(
+    await fetch("/api/corpus/delete", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({ ids }),
+    }),
+  );
+}
+
+export async function runCorpusAgent(payload: {
+  role: string;
+  topic: string;
+  count?: number;
+  kind?: CorpusKind;
+  save_as_draft?: boolean;
+}) {
+  return parse<{ entries: CorpusEntry[]; saved: boolean }>(
+    await fetch("/api/corpus/agent", {
+      method: "POST",
+      headers: json,
+      body: JSON.stringify({
+        role: payload.role,
+        topic: payload.topic,
+        count: payload.count ?? 3,
+        kind: payload.kind ?? "question",
+        save_as_draft: payload.save_as_draft ?? true,
+      }),
+    }),
+  );
+}
+
+export async function bootstrapCorpus(force = false) {
+  return parse<{ imported: number }>(
+    await fetch(`/api/corpus/bootstrap?force=${force ? "true" : "false"}`, { method: "POST" }),
+  );
 }
 
 /**

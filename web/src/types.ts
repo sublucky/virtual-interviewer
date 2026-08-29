@@ -71,3 +71,32 @@ export interface Turn {
   role: "interviewer" | "candidate";
   text: string;
 }
+
+export type CorpusKind = "question" | "rubric" | "knowledge" | "case";
+export type CorpusSource = "manual" | "agent" | "import";
+export type CorpusStatus = "draft" | "active" | "disabled";
+
+export interface CorpusMeta {
+  id: string;
+  kind: CorpusKind | string;
+  role: string;
+  tags: string[];
+  source: CorpusSource | string;
+  status: CorpusStatus | string;
+  version: number;
+  updated_at: string;
+  content?: string;
+  rubric?: string | null;
+  reference_answer?: string | null;
+}
+
+export interface CorpusEntry extends CorpusMeta {
+  content: string;
+  rubric?: string | null;
+  reference_answer?: string | null;
+}
+
+export interface CorpusStats {
+  by_status: Record<string, number>;
+  vectors: number;
+}

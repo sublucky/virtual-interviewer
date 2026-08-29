@@ -287,13 +287,35 @@ async def list_corpus(
     kind: str | None = None,
     status: str | None = None,
     limit: int = 200,
+    with_content: bool = False,
 ) -> dict[str, Any]:
-    return {"items": ctx.corpus.list(role=role, kind=kind, status=status, limit=limit)}
+    items = ctx.corpus.list(role=role, kind=kind, status=status, limit=limit)
+    if with_content and items:
+        full = {e.id: e for e in await ctx.corpus.get_many([row["id"] for row in items])}
+        enriched = []
+        for row in items:
+            entry = full.get(row["id"])
+            if entry is None:
+                enriched.append(row)
+            else:
+                data = entry.model_dump()
+                data.update({k: row[k] for k in ("status", "version", "updated_at") if k in row})
+                enriched.append(data)
+        return {"items": enriched}
+    return {"items": items}
 
 
 @app.get("/api/corpus/stats")
 async def corpus_stats(ctx: Ctx) -> dict[str, Any]:
     return await ctx.corpus.stats()
+
+
+@app.get("/api/corpus/{entry_id}")
+async def get_corpus(entry_id: str, ctx: Ctx) -> dict[str, Any]:
+    entry = await ctx.corpus.get(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="语料不存在或正文未入库")
+    return {"entry": entry.model_dump()}
 
 
 @app.post("/api/corpus")

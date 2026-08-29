@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { InterviewConfig, InterviewStyle, RolePreset, ServiceMeta } from "../types";
 
 const STYLES: { value: InterviewStyle; label: string }[] = [
@@ -21,12 +20,14 @@ export function SetupForm({
   config,
   onChange,
   onStart,
+  onOpenCorpus,
 }: {
   busy: boolean;
   meta: ServiceMeta | null;
   config: InterviewConfig;
   onChange: (next: Partial<InterviewConfig>) => void;
   onStart: () => void;
+  onOpenCorpus?: () => void;
 }) {
   const presets = meta?.presets?.length ? meta.presets : FALLBACK_PRESETS;
 
@@ -120,6 +121,12 @@ export function SetupForm({
       <button type="submit" disabled={busy}>
         {busy ? "连接中…" : "开始面试"}
       </button>
+
+      {onOpenCorpus && (
+        <button type="button" className="ghost" disabled={busy} onClick={onOpenCorpus}>
+          语料管理（RAG）
+        </button>
+      )}
     </form>
   );
 }
