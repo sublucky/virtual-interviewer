@@ -1,0 +1,68 @@
+# 客户端工程师（iOS/Android）种子语料
+defaults:
+  kind: question
+  role: 客户端工程师
+  source: import
+  status: active
+
+entries:
+  - id: seed-client-anr
+    tags: [性能, ANR, 卡顿]
+    content: 线上出现偶发卡顿或 ANR，你会如何采集证据并定位？
+    rubric: |
+      及格：提到主线程耗时；
+      优秀：能谈采样/火焰图、卡顿监控、线程与锁、以及灰度与回滚策略。
+    reference_answer: |
+      看卡顿堆栈与主线程任务；区分 IO/锁/布局；用采样分析热点；灰度验证修复。
+
+  - id: seed-client-architecture
+    tags: [架构, 模块化]
+    content: 一个中大型 App，你怎么做模块拆分和依赖治理，避免改一处牵全身？
+    rubric: |
+      及格：提到模块化；
+      优秀：能讲清边界、接口稳定性、编译隔离与版本演进。
+    reference_answer: |
+      按业务能力拆模块；稳定 API 下沉；禁止反向依赖；CI 检查依赖规则。
+
+  - id: seed-client-offline
+    tags: [弱网, 离线, 体验]
+    content: 弱网或短暂离线时，列表页和提交操作你会怎么设计体验？
+    rubric: |
+      及格：有加载失败重试；
+      优秀：能谈本地缓存、乐观更新、冲突合并与明确的状态提示。
+    reference_answer: |
+      读：缓存优先+后台刷新；写：队列与重试；冲突可合并或提示用户；状态可见。
+
+  - id: seed-client-release
+    tags: [发布, 热修, 质量]
+    content: 发版后发现严重崩溃，商店审核来不及，你有哪些止血手段？
+    rubric: |
+      及格：提到热修复或回滚；
+      优秀：能讲清开关、分阶段发布、崩溃门槛与沟通机制。
+    reference_answer: |
+      功能开关关闭；热修/配置回滚；暂停放量；同步客服与公告；根因修复后再放量。
+
+  - id: seed-client-memory
+    tags: [内存, 图片, 性能]
+    content: 图片很多的信息流如何控制内存峰值，又不太影响滑动流畅度？
+    rubric: |
+      及格：提到缓存与回收；
+      优秀：能谈解码尺寸、复用、生命周期与监控。
+    reference_answer: |
+      按控件尺寸解码；复用与分级缓存；页面不可见时释放；监控内存水位。
+
+  - id: seed-client-rubric
+    kind: rubric
+    tags: [评分标准]
+    content: 客户端候选人评分维度与档位定义。
+    rubric: |
+      技术深度：只会 UI=2；懂系统机制=3；能做性能与稳定性治理=4；有平台级方案=5。
+      工程实践：能交付需求=2；有质量意识=3；能建监控与发布体系=4；推动跨端规范=5。
+      问题解决：被动修 bug=2；能复现定位=3；能体系化预防=4；能沉淀平台能力=5。
+
+  - id: seed-client-knowledge-stability
+    kind: knowledge
+    tags: [稳定性, 面经]
+    content: |
+      客户端稳定性追问：崩溃率 → 卡顿率 → 启动耗时 → 包体积。
+      要求候选人给出指标定义、基线、告警阈值与一次真实治理案例。

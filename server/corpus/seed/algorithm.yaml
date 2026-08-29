@@ -1,0 +1,68 @@
+# 算法工程师种子语料
+defaults:
+  kind: question
+  role: 算法工程师
+  source: import
+  status: active
+
+entries:
+  - id: seed-algo-metric
+    tags: [评估, 指标, 业务]
+    content: 你负责的模型上线后，怎么判断它是否真的带来了业务提升，而不是只看离线 AUC？
+    rubric: |
+      及格：提到 A/B 实验；
+      优秀：能设计核心业务指标、护栏指标、实验周期与显著性判断，并说明离线与在线不一致时怎么处理。
+    reference_answer: |
+      定义主指标与护栏；做分流实验；看置信区间与长期效应；离线好在线差时排查特征穿越与分布漂移。
+
+  - id: seed-algo-feature
+    tags: [特征, 工程, 稳定性]
+    content: 线上特征服务偶尔超时，模型效果抖动，你会怎么排查和改造？
+    rubric: |
+      及格：加超时与默认值；
+      优秀：能谈特征一致性、缓存、降级策略、监控与回放对比。
+    reference_answer: |
+      对比训练/推理特征；对关键特征设 SLA 与兜底；缓存热点特征；建立特征质量监控与回放。
+
+  - id: seed-algo-imbalance
+    tags: [样本, 不均衡, 训练]
+    content: 正负样本比例 1:1000 的场景，你怎么训练和评估，避免看起来很高的准确率？
+    rubric: |
+      及格：提到过采样/欠采样或调阈值；
+      优秀：能谈 PR 曲线、代价敏感、分层评估与业务召回约束。
+    reference_answer: |
+      不用准确率做主指标；看 PR/F1 或业务召回；可用重采样、class weight、难例挖掘；分桶评估。
+
+  - id: seed-algo-llm-rag
+    tags: [LLM, RAG, 应用]
+    content: 做一个企业内部问答，为什么上 RAG 而不是直接微调？你会怎么评估检索质量？
+    rubric: |
+      及格：知道知识更新与幻觉；
+      优秀：能谈成本、时效、可追溯，以及召回率/命中率/答案忠实度评估。
+    reference_answer: |
+      RAG 更易更新、可引用出处；评估检索 hit@k、答案 groundedness；坏例做 query 改写与切分优化。
+
+  - id: seed-algo-latency
+    tags: [推理, 延迟, 工程]
+    content: 模型推理 P99 要压到 50ms 以内，你会从哪些方向优化？
+    rubric: |
+      及格：提到量化或批处理；
+      优秀：能系统讲模型结构、硬件、批大小、缓存、特征与服务链路的端到端优化。
+    reference_answer: |
+      先拆端到端耗时；再做量化/蒸馏、算子优化、动态 batch、特征预计算与就近部署。
+
+  - id: seed-algo-rubric
+    kind: rubric
+    tags: [评分标准]
+    content: 算法候选人评分维度与档位定义。
+    rubric: |
+      建模能力：只会调参=2；懂原理=3；能匹配业务目标建模=4；有完整实验闭环=5。
+      工程落地：只会 notebook=2；能上线推理=3；能做监控与回滚=4；能推动特征/数据平台=5。
+      业务理解：只谈模型=2；知道主指标=3；能设计实验=4；能权衡长期价值与风险=5。
+
+  - id: seed-algo-knowledge-eval
+    kind: knowledge
+    tags: [评估, 面经]
+    content: |
+      算法面追问重点：离线指标 → 在线指标 → 失败案例 → 数据与特征问题。
+      候选人若跳过数据质量直接谈模型结构，优先回拉到样本与标注。

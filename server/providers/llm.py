@@ -318,7 +318,10 @@ class MockLLM:
         max_tokens: int = 1800,
         temperature: float = 0.3,
     ) -> dict[str, Any]:
-        _ = messages, max_tokens, temperature
+        _ = max_tokens, temperature
+        blob = "\n".join(m.get("content") or "" for m in messages)
+        if "题库编辑" in blob or "需要生成条数" in blob:
+            return _mock_corpus_entries(blob)
         return {
             "overall": 72,
             "recommendation": "lean_hire",
@@ -339,6 +342,63 @@ class MockLLM:
 
     async def health(self) -> HealthStatus:
         return HealthStatus(ok=True, extra={"provider": "mock", "model": "mock-interviewer"})
+
+
+def _mock_corpus_entries(blob: str) -> dict[str, Any]:
+    """为语料 Agent 提供可入库的 mock 草稿（本地联调不依赖真实模型）。"""
+    role = "通用"
+    topic = "综合"
+    count = 3
+    for line in blob.splitlines():
+        if line.startswith("岗位："):
+            role = line.split("：", 1)[1].strip() or role
+        elif line.startswith("主题："):
+            topic = line.split("：", 1)[1].strip() or topic
+        elif line.startswith("需要生成条数："):
+            try:
+                count = max(1, min(10, int(line.split("：", 1)[1].strip())))
+            except ValueError:
+                pass
+
+    templates = [
+        (
+            "结合{topic}，请讲一个你做过的真实案例：目标是什么，最大难点在哪，最终如何验证？",
+            "及格：有完整案例；优秀：有量化目标、取舍与验证手段。",
+            "按 STAR：背景 → 难点 → 方案取舍 → 指标结果。",
+        ),
+        (
+            "在{topic}场景下，如果出现性能或效果回退，你会如何定位并做止血？",
+            "及格：有排查步骤；优秀：有监控、回滚/降级与防复发机制。",
+            "先确认变更窗口，再看核心指标，再定位依赖，最后止血并复盘。",
+        ),
+        (
+            "围绕{topic}，你如何在交付速度与长期可维护性之间做权衡？",
+            "及格：能说出取舍；优秀：有明确标准、风险清单与补齐计划。",
+            "定义 MVP 成功标准与非目标，记录技术债与补齐时间盒。",
+        ),
+        (
+            "请评价一种常见的{topic}方案，说明它适用与不适用的边界。",
+            "及格：知道优缺点；优秀：能结合容量、成本、团队能力谈边界。",
+            "适用条件、失败模式、替代方案各给一条。",
+        ),
+        (
+            "如果让你从零搭建与{topic}相关的最小可行体系，第一周做什么？",
+            "及格：有步骤；优秀：有里程碑、验收指标与风险预案。",
+            "先定指标与数据，再做最小链路，最后补监控与回滚。",
+        ),
+    ]
+    entries = []
+    for i in range(count):
+        content_t, rubric_t, answer_t = templates[i % len(templates)]
+        entries.append(
+            {
+                "content": content_t.format(topic=topic),
+                "tags": [topic, role, "agent-mock"],
+                "rubric": rubric_t,
+                "reference_answer": answer_t,
+            }
+        )
+    return {"entries": entries}
 
 
 def build_llm(settings: LLMSettings) -> ChatLLM:

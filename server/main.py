@@ -165,7 +165,9 @@ async def meta(ctx: Ctx) -> dict[str, Any]:
         "presets": [
             {"role": "后端工程师", "style": "probe", "rounds": 8},
             {"role": "前端工程师", "style": "probe", "rounds": 8},
-            {"role": "通用", "style": "gentle", "rounds": 6},
+            {"role": "算法工程师", "style": "probe", "rounds": 8},
+            {"role": "产品经理", "style": "gentle", "rounds": 8},
+            {"role": "客户端工程师", "style": "probe", "rounds": 8},
         ],
     }
 

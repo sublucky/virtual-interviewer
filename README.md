@@ -20,6 +20,17 @@ make web           # 另开终端启动前端 http://127.0.0.1:5173
 
 `make smoke` 不需要 GPU、模型或数字人服务，用于验证骨架自洽。真实面试需要配置 LLM。
 
+### 语料入库（RAG）
+
+```bash
+make ingest            # 进程内：强制导入 seed/*.yaml + Agent 生成 draft
+make ingest-http       # 对已启动的后端发 HTTP（服务占用内嵌 Qdrant 时用这个）
+# 若要把本次 Agent 草稿直接启用：
+./.venv/bin/python scripts/ingest_corpus.py --http http://127.0.0.1:8090 --activate
+```
+
+种子语料覆盖 5 个岗位（后端/前端/算法/产品/客户端）+ 通用行为面；Agent 产出默认 `draft`，需审核后 `POST /api/corpus/status` 启为 `active` 才参与检索。
+
 ## 配置
 
 编辑 `.env`（模板见 `.env.example`）：
