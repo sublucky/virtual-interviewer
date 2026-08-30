@@ -36,7 +36,51 @@ export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 GPU_COUNT=\$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')
 echo "检测到 GPU 数量: \${GPU_COUNT}"
 
-if [[ "\${GPU_COUNT}" -lt 2 ]]; then
+if [[ "\${GPU_COUNT}" -eq 2 ]]; then
+  echo "双卡分进程：先 Thinker TP=2，加载后再起 Talker/Code2Wav"
+  CFG="${REMOTE_DIR}/deploy/remote/qwen3_omni_2x40gb.yaml"
+  CUDA_VISIBLE_DEVICES=0,1 nohup vllm serve "${OMNI_MODEL}" \\
+    --omni --no-async-chunk --stage-id 0 \\
+    --port ${OMNI_PORT} --host 0.0.0.0 \\
+    --omni-master-address 127.0.0.1 --omni-master-port ${OMNI_MASTER_PORT} \\
+    --deploy-config "\${CFG}" \\
+    > logs/omni-stage0.log 2>&1 &
+  echo \$! > logs/omni-stage0.pid
+  echo "等待 Thinker 权重加载完成..."
+  loaded=0
+  for i in \$(seq 1 90); do
+    if grep -E "Available KV cache memory: [1-9]" logs/omni-stage0.log >/dev/null 2>&1; then
+      used0=\$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i 0 | tr -d ' ')
+      used1=\$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i 1 | tr -d ' ')
+      echo "Thinker 权重 100% used0=\${used0}MiB used1=\${used1}MiB"
+      loaded=1
+      break
+    fi
+    if ! kill -0 "\$(cat logs/omni-stage0.pid)" 2>/dev/null; then
+      echo "stage0 进程退出" >&2
+      tail -n 40 logs/omni-stage0.log >&2 || true
+      exit 1
+    fi
+    sleep 10
+  done
+  if [[ "\${loaded}" != "1" ]]; then
+    echo "Thinker 加载超时，见 logs/omni-stage0.log" >&2
+    tail -n 40 logs/omni-stage0.log >&2 || true
+    exit 1
+  fi
+  CUDA_VISIBLE_DEVICES=1 nohup vllm serve "${OMNI_MODEL}" \\
+    --omni --no-async-chunk --stage-id 1 --headless \\
+    --omni-master-address 127.0.0.1 --omni-master-port ${OMNI_MASTER_PORT} \\
+    --deploy-config "\${CFG}" \\
+    > logs/omni-stage1.log 2>&1 &
+  echo \$! > logs/omni-stage1.pid
+  CUDA_VISIBLE_DEVICES=0 nohup vllm serve "${OMNI_MODEL}" \\
+    --omni --no-async-chunk --stage-id 2 --headless \\
+    --omni-master-address 127.0.0.1 --omni-master-port ${OMNI_MASTER_PORT} \\
+    --deploy-config "\${CFG}" \\
+    > logs/omni-stage2.log 2>&1 &
+  echo \$! > logs/omni-stage2.pid
+elif [[ "\${GPU_COUNT}" -lt 2 ]]; then
   echo "单卡统一启动（Thinker+Talker+Code2Wav 同卡，见 qwen3_omni_1gpu.yaml）:${OMNI_PORT}"
   CUDA_VISIBLE_DEVICES=${OMNI_GPU_THINKER} nohup vllm serve "${OMNI_MODEL}" \\
     --omni --no-async-chunk \\
