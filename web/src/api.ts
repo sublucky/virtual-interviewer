@@ -193,3 +193,36 @@ export async function streamTurn(
   }
   if (buffer.trim()) emitFrame(buffer, onEvent);
 }
+
+export async function streamVoiceTurn(
+  sessionId: string,
+  audio: Blob,
+  onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const body = new FormData();
+  body.append("file", audio, "answer.wav");
+  const resp = await fetch(`/api/sessions/${sessionId}/voice/turn`, {
+    method: "POST",
+    body,
+    signal,
+  });
+  if (!resp.ok || !resp.body) throw new Error(`语音请求失败：${resp.status}`);
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) emitFrame(frame, onEvent);
+  }
+  if (buffer.trim()) emitFrame(buffer, onEvent);
+}
+
+export async function interruptVoice(sessionId: string) {
+  await fetch(`/api/sessions/${sessionId}/voice/interrupt`, { method: "POST" }).catch(() => undefined);
+}

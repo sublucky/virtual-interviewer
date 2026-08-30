@@ -72,6 +72,9 @@ class FakeAvatar:
     async def speak(self, rtc_session_id: str, text: str, *, interrupt: bool = False) -> None:
         self.spoken.append(text)
 
+    async def speak_audio(self, rtc_session_id: str, wav_bytes: bytes, *, interrupt: bool = False) -> None:
+        self.spoken.append(f"<audio:{len(wav_bytes)}>")
+
 
 async def main() -> int:
     workdir = Path(tempfile.mkdtemp(prefix="vi-smoke-"))

@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,7 @@ from server.pipeline import Pipeline
 from server.providers.avatar import LiveTalkingAvatar
 from server.providers.embedding import build_embedding
 from server.providers.llm import build_llm
+from server.providers.omni_realtime import build_omni
 from server.rag.retriever import Retriever
 from server.rag.store import VectorStore
 from server.session import InterviewSession, SessionRepository
@@ -42,6 +43,7 @@ class Container:
         )
         self.store = VectorStore(settings.rag)
         self.avatar = LiveTalkingAvatar(settings.avatar)
+        self.omni = build_omni(settings.omni, debug=self.debug)
         self.retriever = Retriever(
             store=self.store, embedding=self.embedding, settings=settings.rag, debug=self.debug
         )
@@ -60,6 +62,8 @@ class Container:
             ),
             avatar=self.avatar,
             debug=self.debug,
+            omni=self.omni,
+            voice_mode=settings.omni.voice_mode,
         )
 
     async def startup(self) -> None:
@@ -69,6 +73,7 @@ class Container:
 
     async def shutdown(self) -> None:
         await self.avatar.aclose()
+        await self.omni.aclose()
         self.store.close()
         self.storage.close()
 
@@ -151,11 +156,18 @@ class CorpusAgentRequest(BaseModel):
 
 @app.get("/api/meta")
 async def meta(ctx: Ctx) -> dict[str, Any]:
-    llm, avatar, vector = await ctx.llm.health(), await ctx.avatar.health(), await ctx.store.health()
+    llm, avatar, vector, omni = (
+        await ctx.llm.health(),
+        await ctx.avatar.health(),
+        await ctx.store.health(),
+        await ctx.omni.health(),
+    )
     return {
         "llm": llm.model_dump(),
         "avatar": avatar.model_dump(),
         "vector": vector.model_dump(),
+        "omni": omni.model_dump(),
+        "voice_mode": settings.omni.voice_mode,
         "embedding": {
             "provider": settings.rag.embedding_provider,
             "dim": settings.rag.embedding_dim,
@@ -207,6 +219,43 @@ async def send_message(session_id: str, payload: MessageRequest, ctx: Ctx) -> St
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/sessions/{session_id}/voice/turn")
+async def voice_turn(
+    session_id: str,
+    ctx: Ctx,
+    file: UploadFile | None = File(None),
+    end: bool = Form(False),
+) -> StreamingResponse:
+    """MVP：整段录音上传（按住说完再传）。预留后续 WS /voice/stream。"""
+    session = ctx.session(session_id)
+    ctx.pipeline.attach_debug(session_id)
+    audio = await file.read() if file is not None else b""
+
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            async for kind, data in ctx.pipeline.voice_turn(session, audio=audio, end=end):
+                yield _sse({"event": kind, **data})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse({"event": "error", "message": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/sessions/{session_id}/voice/interrupt")
+async def voice_interrupt(session_id: str, ctx: Ctx) -> dict[str, Any]:
+    session = ctx.session(session_id)
+    if session.rtc_session_id:
+        try:
+            await ctx.avatar.interrupt(session.rtc_session_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "detail": str(exc)}
+    return {"ok": True}
 
 
 @app.get("/api/sessions/{session_id}")

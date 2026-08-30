@@ -16,6 +16,7 @@ from server.interview.engine import InterviewEngine
 from server.interview.evaluator import Evaluator
 from server.models import DebugEvent, SessionState
 from server.providers.llm import LLMError
+from server.providers.omni_realtime import OmniError
 from server.session import InterviewSession, SessionRepository
 
 _SENTENCE_END = re.compile(r"[。！？!?；;\n]")
@@ -34,11 +35,15 @@ class Pipeline:
         evaluator: Evaluator,
         avatar: Any,
         debug: DebugEmitter,
+        omni: Any = None,
+        voice_mode: str = "text",
     ) -> None:
         self._sessions = sessions
         self._engine = engine
         self._evaluator = evaluator
         self._avatar = avatar
+        self._omni = omni
+        self._voice_mode = voice_mode
         self._debug = debug
         self._queues: dict[str, asyncio.Queue[DebugEvent]] = {}
 
@@ -82,6 +87,36 @@ class Pipeline:
                 yield event
             async for event in self._finish_listening(session, reason="turn_done"):
                 yield event
+
+    async def voice_turn(
+        self,
+        session: InterviewSession,
+        *,
+        audio: bytes,
+        end: bool = False,
+    ) -> AsyncIterator[Event]:
+        """语音回合：Omni 转写 → 写入会话 → 与文字 turn 同一条状态机。"""
+        if end:
+            async for event in self.turn(session, end=True):
+                yield event
+            return
+        if self._omni is None:
+            yield "error", {"message": "语音引擎未配置"}
+            return
+        try:
+            transcript = (await self._omni.transcribe(audio, session_id=session.id)).strip()
+        except OmniError as exc:
+            yield "error", {"message": f"语音转写失败：{exc}"}
+            return
+        except Exception as exc:  # noqa: BLE001
+            yield "error", {"message": f"语音转写失败：{exc}"}
+            return
+        yield "transcript", {"text": transcript}
+        if not transcript:
+            yield "error", {"message": "没有识别到有效语音"}
+            return
+        async for event in self.turn(session, text=transcript):
+            yield event
 
     def _back_to_listening(self, session: InterviewSession, *, reason: str) -> None:
         if session.can_transition(SessionState.LISTENING):
@@ -148,9 +183,40 @@ class Pipeline:
             yield "error", {"message": str(exc)}
 
     async def _push(self, session: InterviewSession, text: str, *, interrupt: bool) -> None:
-        """把一句话推给数字人。推送失败降级为纯文本面试，不中断会话。"""
+        """把一句话推给数字人。Omni 模式先合成再 /humanaudio，失败降级内置 TTS。"""
         if not session.rtc_session_id:
             return
+        if self._voice_mode == "omni" and self._omni is not None:
+            if await self._push_omni_audio(session, text, interrupt=interrupt):
+                return
+        await self._push_tts(session, text, interrupt=interrupt)
+
+    async def _push_omni_audio(self, session: InterviewSession, text: str, *, interrupt: bool) -> bool:
+        watch = Stopwatch()
+        try:
+            wav = await self._omni.synthesize(text, session_id=session.id)
+            await self._avatar.speak_audio(session.rtc_session_id, wav, interrupt=interrupt)
+            self._debug.comm(
+                session.id,
+                target="livetalking",
+                action="humanaudio",
+                took_ms=watch.elapsed_ms(),
+                chars=len(text),
+                bytes=len(wav),
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 — Omni/口型失败则走内置 TTS
+            self._debug.comm(
+                session.id,
+                target="omni",
+                action="speak_audio",
+                took_ms=watch.elapsed_ms(),
+                status="error",
+                error=str(exc),
+            )
+            return False
+
+    async def _push_tts(self, session: InterviewSession, text: str, *, interrupt: bool) -> None:
         watch = Stopwatch()
         try:
             await self._avatar.speak(session.rtc_session_id, text, interrupt=interrupt)

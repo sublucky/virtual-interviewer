@@ -19,6 +19,9 @@ web: ## 启动前端开发服务器（127.0.0.1:5173）
 smoke: ## 假 LLM 跑通全链路自检
 	$(PY) scripts/smoke.py
 
+smoke-voice: ## 假 Omni 跑通语音转写 + 数字人音频路径
+	$(PY) scripts/smoke_voice.py
+
 ingest: ## 强制导入种子语料 + Agent 生成 draft
 	$(PY) scripts/ingest_corpus.py
 

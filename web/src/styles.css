@@ -109,7 +109,7 @@ button.chip.active {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: 8px;
 }
 
@@ -213,6 +213,19 @@ button.mic {
 }
 
 button.mic.active {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+
+button.talk {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+button.talk.recording {
   background: var(--err);
   border-color: var(--err);
   color: #fff;

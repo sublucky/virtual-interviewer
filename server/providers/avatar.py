@@ -17,6 +17,9 @@ from server.models import HealthStatus
 class AvatarRenderer(Protocol):
     async def open_stream(self, sdp: str, **kw: Any) -> tuple[str, str]: ...
     async def speak(self, rtc_session_id: str, text: str, *, interrupt: bool = False) -> None: ...
+    async def speak_audio(
+        self, rtc_session_id: str, wav_bytes: bytes, *, interrupt: bool = False
+    ) -> None: ...
     async def interrupt(self, rtc_session_id: str) -> None: ...
     async def is_speaking(self, rtc_session_id: str) -> bool: ...
     async def health(self) -> HealthStatus: ...
@@ -55,6 +58,22 @@ class LiveTalkingAvatar:
         )
         resp.raise_for_status()
 
+    async def speak_audio(
+        self, rtc_session_id: str, wav_bytes: bytes, *, interrupt: bool = False
+    ) -> None:
+        """外置音频驱动口型：POST /humanaudio（sessionid + file）。"""
+        if interrupt:
+            try:
+                await self.interrupt(rtc_session_id)
+            except Exception:  # noqa: BLE001 — 打断失败仍尝试推音频
+                pass
+        resp = await self._client.post(
+            "/humanaudio",
+            data={"sessionid": rtc_session_id},
+            files={"file": ("speech.wav", wav_bytes, "audio/wav")},
+        )
+        resp.raise_for_status()
+
     async def interrupt(self, rtc_session_id: str) -> None:
         resp = await self._client.post("/interrupt_talk", json={"sessionid": rtc_session_id})
         resp.raise_for_status()
@@ -86,6 +105,11 @@ class NullAvatar:
         raise RuntimeError("未配置数字人服务")
 
     async def speak(self, rtc_session_id: str, text: str, *, interrupt: bool = False) -> None:
+        return None
+
+    async def speak_audio(
+        self, rtc_session_id: str, wav_bytes: bytes, *, interrupt: bool = False
+    ) -> None:
         return None
 
     async def interrupt(self, rtc_session_id: str) -> None:

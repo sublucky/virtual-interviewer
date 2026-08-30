@@ -55,6 +55,41 @@ class AvatarSettings:
 
 
 @dataclass(frozen=True)
+class OmniSettings:
+    """Qwen3-Omni：Realtime WS + chat/completions 音频备用。"""
+
+    voice_mode: str = field(default_factory=lambda: _env("VOICE_MODE", "text").lower())
+    api_base: str = field(default_factory=lambda: _env("OMNI_API_BASE", "http://127.0.0.1:8091").rstrip("/"))
+    model: str = field(default_factory=lambda: _env("OMNI_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct"))
+    speaker: str = field(default_factory=lambda: _env("OMNI_SPEAKER", "chelsie"))
+    timeout: float = 90.0
+
+    @property
+    def enabled(self) -> bool:
+        return self.voice_mode == "omni"
+
+    @property
+    def http_base(self) -> str:
+        raw = self.api_base
+        if raw.startswith("ws://"):
+            return "http://" + raw[5:]
+        if raw.startswith("wss://"):
+            return "https://" + raw[6:]
+        return raw
+
+    @property
+    def realtime_url(self) -> str:
+        raw = self.api_base
+        if raw.startswith("http://"):
+            return "ws://" + raw[7:] + "/v1/realtime"
+        if raw.startswith("https://"):
+            return "wss://" + raw[8:] + "/v1/realtime"
+        if raw.endswith("/v1/realtime"):
+            return raw
+        return raw.rstrip("/") + "/v1/realtime"
+
+
+@dataclass(frozen=True)
 class RAGSettings:
     qdrant_url: str = field(default_factory=lambda: _env("QDRANT_URL"))
     qdrant_path: Path = field(default_factory=lambda: _resolve(_env("QDRANT_PATH", "./data/qdrant")))
@@ -78,6 +113,7 @@ class Settings:
 
     llm: LLMSettings = field(default_factory=LLMSettings)
     avatar: AvatarSettings = field(default_factory=AvatarSettings)
+    omni: OmniSettings = field(default_factory=OmniSettings)
     rag: RAGSettings = field(default_factory=RAGSettings)
 
     web_dist: Path = field(default_factory=lambda: ROOT / "web" / "dist")

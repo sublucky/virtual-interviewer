@@ -3,8 +3,10 @@ import {
   createSession,
   fetchDebugHistory,
   fetchMeta,
+  interruptVoice,
   reportFromEvent,
   streamTurn,
+  streamVoiceTurn,
   toggleDebug,
 } from "./api";
 import { CorpusAdmin } from "./components/CorpusAdmin";
@@ -13,6 +15,7 @@ import { InterviewStage } from "./components/InterviewStage";
 import { ReportView } from "./components/ReportView";
 import { SetupForm } from "./components/SetupForm";
 import { useSpeech } from "./hooks/useSpeech";
+import { useVoiceCapture } from "./hooks/useVoiceCapture";
 import { useWebRTC } from "./hooks/useWebRTC";
 import type {
   DebugEvent,
@@ -67,6 +70,11 @@ export default function App() {
 
   const handleEvent = useCallback((event: StreamEvent) => {
     switch (event.event) {
+      case "transcript":
+        if (event.text.trim()) {
+          setTurns((t) => [...t, { role: "candidate", text: event.text }]);
+        }
+        break;
       case "thinking":
         setThinking(true);
         break;
@@ -168,6 +176,31 @@ export default function App() {
   );
 
   const speech = useSpeech(submit);
+  const capture = useVoiceCapture();
+  const voiceOmni = meta?.voice_mode === "omni";
+
+  const holdStart = useCallback(() => {
+    if (inFlightRef.current || busy) return;
+    if (sessionRef.current) void interruptVoice(sessionRef.current);
+    void capture.start().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [busy, capture]);
+
+  const holdEnd = useCallback(async () => {
+    const blob = await capture.stop();
+    if (!blob || inFlightRef.current || !sessionRef.current) return;
+    inFlightRef.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await streamVoiceTurn(sessionRef.current, blob, handleEvent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      inFlightRef.current = false;
+      setBusy(false);
+      setThinking(false);
+    }
+  }, [capture, handleEvent]);
 
   const handleToggleDebug = useCallback(
     async (enabled: boolean) => {
@@ -243,9 +276,13 @@ export default function App() {
             partial={speech.partial}
             busy={busy}
             enableRtc={enableRtc}
+            voiceMode={voiceOmni}
+            recording={capture.recording}
             onConnectVideo={connectVideo}
             onSubmit={submit}
             onToggleMic={() => (speech.listening ? speech.stop() : speech.start())}
+            onHoldStart={holdStart}
+            onHoldEnd={() => void holdEnd()}
             onEnd={() => void run({ end: true })}
           />
         )}

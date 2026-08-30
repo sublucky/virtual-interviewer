@@ -13,9 +13,13 @@ interface Props {
   partial: string;
   busy: boolean;
   enableRtc: boolean;
+  voiceMode: boolean;
+  recording: boolean;
   onConnectVideo: (video: HTMLVideoElement) => void;
   onSubmit: (text: string) => void;
   onToggleMic: () => void;
+  onHoldStart: () => void;
+  onHoldEnd: () => void;
   onEnd: () => void;
 }
 
@@ -85,10 +89,16 @@ export function InterviewStage(props: Props) {
       >
         <textarea
           rows={2}
-          value={props.listening ? props.partial || "（正在听…）" : draft}
-          readOnly={props.listening}
-          disabled={props.busy}
-          placeholder={props.busy ? "面试官发言中…" : "输入回答，或点麦克风口述"}
+          value={props.recording ? "（按住说话中…）" : props.listening ? props.partial || "（正在听…）" : draft}
+          readOnly={props.listening || props.recording}
+          disabled={props.busy || props.recording}
+          placeholder={
+            props.busy
+              ? "面试官发言中…"
+              : props.voiceMode
+                ? "按住说话作答，也可在此输入文字"
+                : "输入回答，或点麦克风口述"
+          }
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -98,17 +108,35 @@ export function InterviewStage(props: Props) {
           }}
         />
         <div className="composer-actions">
-          {props.micSupported && (
+          {props.voiceMode ? (
             <button
               type="button"
-              className={props.listening ? "mic active" : "mic"}
-              onClick={props.onToggleMic}
+              className={props.recording ? "talk recording" : "talk"}
               disabled={props.busy}
+              onContextMenu={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                props.onHoldStart();
+              }}
+              onPointerUp={props.onHoldEnd}
+              onPointerCancel={props.onHoldEnd}
             >
-              {props.listening ? "停止" : "口述"}
+              {props.recording ? "松开结束并发送" : "按住说话"}
             </button>
+          ) : (
+            props.micSupported && (
+              <button
+                type="button"
+                className={props.listening ? "mic active" : "mic"}
+                onClick={props.onToggleMic}
+                disabled={props.busy}
+              >
+                {props.listening ? "停止" : "口述"}
+              </button>
+            )
           )}
-          <button type="submit" disabled={props.busy || !draft.trim()}>
+          <button type="submit" disabled={props.busy || props.recording || !draft.trim()}>
             发送
           </button>
           <button type="button" className="ghost" onClick={props.onEnd} disabled={props.busy}>
