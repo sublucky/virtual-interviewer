@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/common.sh"
 
-OMNI_MODEL="${OMNI_MODEL:-Qwen/Qwen3-Omni-30B-A3B-Instruct}"
+OMNI_MODEL="${OMNI_MODEL:-marksverdhei/Qwen3-Omni-30B-A3B-FP8}"
 HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 echo_cfg
@@ -22,8 +22,8 @@ export HF_HOME="\${HOME}/.cache/huggingface"
 export OMNI_MODEL="${OMNI_MODEL}"
 
 avail_gb=\$(df -P . | awk 'NR==2 {printf "%d", \$4/1024/1024}')
-if [[ "\${avail_gb}" -lt 70 ]]; then
-  echo "警告：可用磁盘约 \${avail_gb}GB，30B 权重可能不够，请先清理缓存" >&2
+if [[ "\${avail_gb}" -lt 40 ]]; then
+  echo "警告：可用磁盘约 \${avail_gb}GB，FP8 权重约 35GB，可能不够" >&2
 fi
 
 # Ubuntu 系统 python3 常缺 python3-venv/ensurepip（且无免密 sudo）。

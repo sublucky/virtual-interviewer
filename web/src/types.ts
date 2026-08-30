@@ -34,7 +34,11 @@ export interface ServiceMeta {
   avatar: HealthStatus;
   vector: HealthStatus;
   omni?: HealthStatus;
+  asr?: HealthStatus;
+  tts?: HealthStatus;
   voice_mode?: "text" | "omni" | string;
+  asr_provider?: string;
+  tts_provider?: string;
   embedding: { provider: string; dim: number };
   llm_provider: string;
   debug_default: boolean;
@@ -65,7 +69,7 @@ export type StreamEvent =
   | { event: "thinking" }
   | { event: "done"; text: string; state: string }
   | { event: "transcript"; text: string }
-  | { event: "assistant_audio"; url?: string }
+  | { event: "assistant_audio"; format?: string; audio_b64?: string; interrupt?: boolean; bytes?: number; url?: string }
   | { event: "evaluating" }
   | ({ event: "report" } & Partial<Report>)
   | ({ event: "debug" } & DebugEvent)

@@ -25,10 +25,10 @@ const BUDGET: Record<string, number> = {
 };
 
 const FLOW = [
-  { key: "asr", label: "ASR", source: "浏览器" },
+  { key: "asr", label: "ASR", source: "浏览器/Whisper/Omni" },
   { key: "rag", label: "RAG", source: "retriever" },
   { key: "llm", label: "LLM", source: "llm" },
-  { key: "tts", label: "TTS", source: "livetalking" },
+  { key: "tts", label: "TTS", source: "ChatTTS/Omni/LiveTalking" },
   { key: "avatar", label: "数字人", source: "livetalking" },
 ] as const;
 
@@ -195,7 +195,7 @@ function flowLamps(events: DebugEvent[]): Record<string, { status: string; label
   const llmFail = lastLog && String(lastLog.message ?? "").includes("LLM");
 
   return {
-    asr: { status: "idle", label: "浏览器 Web Speech" },
+    asr: { status: "idle", label: "浏览器 Web Speech / Whisper / Omni" },
     rag: lastRetrieval
       ? { status: "ok", label: `${lastRetrieval.took_ms}ms · ${((lastRetrieval.hits as unknown[]) ?? []).length} 命中` }
       : { status: "idle", label: "尚未检索" },
@@ -205,7 +205,7 @@ function flowLamps(events: DebugEvent[]): Record<string, { status: string; label
         ? { status: lastLlm.status === "error" ? "down" : "ok", label: `${lastLlm.action} ${lastLlm.took_ms}ms` }
         : { status: "idle", label: "等待首 token" },
     tts: lastAvatar
-      ? { status: lastAvatar.status === "error" ? "down" : "ok", label: "LiveTalking 内置" }
+      ? { status: lastAvatar.status === "error" ? "down" : "ok", label: "ChatTTS/Omni 合成 / LiveTalking 内置" }
       : { status: "idle", label: "未推送（文字模式）" },
     avatar: lastAvatar
       ? { status: lastAvatar.status === "error" ? "down" : "ok", label: `${lastAvatar.action} ${lastAvatar.took_ms}ms` }

@@ -42,7 +42,7 @@ export function SetupForm({
       <h1>虚拟面试官</h1>
       <p className="muted">
         配置岗位后开始。数字人或 Omni 不可用时自动走文字模式
-        {meta?.voice_mode === "omni" ? "（当前 VOICE_MODE=omni）" : ""}。
+        {meta?.voice_mode === "omni" ? "（当前语音链路：ASR → LLM → TTS）" : ""}。
       </p>
 
       <HealthBar meta={meta} />
@@ -137,14 +137,26 @@ export function SetupForm({
 function HealthBar({ meta }: { meta: ServiceMeta | null }) {
   if (!meta) return <p className="muted">正在探测后端服务…</p>;
   const omniOk = Boolean(meta.omni?.ok);
+  const ttsOk = Boolean(meta.tts?.ok) || omniOk;
   const items = [
     { name: "LLM", ok: meta.llm.ok, hint: meta.llm_provider || String(meta.llm.extra?.provider ?? "") },
     { name: "向量库", ok: meta.vector.ok, hint: String(meta.embedding.provider) },
     { name: "数字人", ok: meta.avatar.ok, hint: meta.avatar.ok ? "LiveTalking" : "文字模式" },
     {
-      name: "Omni",
-      ok: omniOk,
-      hint: omniOk ? meta.voice_mode || "omni" : meta.voice_mode === "omni" ? "降级文字" : "未启用",
+      name: "ASR",
+      ok: meta.asr?.ok ?? false,
+      hint: meta.asr?.ok ? String(meta.asr.extra?.model ?? "whisper") : meta.asr_provider === "browser" ? "浏览器" : "未启用",
+    },
+    {
+      name: "TTS",
+      ok: ttsOk,
+      hint: meta.tts?.ok
+        ? "ChatTTS"
+        : omniOk
+          ? "Omni（兜底）"
+          : meta.voice_mode === "omni"
+            ? "降级文字"
+            : "未启用",
     },
   ];
   return (

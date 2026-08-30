@@ -14,6 +14,7 @@ import { DebugPanel } from "./components/DebugPanel";
 import { InterviewStage } from "./components/InterviewStage";
 import { ReportView } from "./components/ReportView";
 import { SetupForm } from "./components/SetupForm";
+import { enqueueAssistantAudio, stopAssistantAudio } from "./lib/assistantAudio";
 import { useSpeech } from "./hooks/useSpeech";
 import { useVoiceCapture } from "./hooks/useVoiceCapture";
 import { useWebRTC } from "./hooks/useWebRTC";
@@ -57,6 +58,10 @@ export default function App() {
   const inFlightRef = useRef(false);
   const skipRtc = rtc.skip;
   const connectRtc = rtc.connect;
+  const rtcStatusRef = useRef(rtc.status);
+  useEffect(() => {
+    rtcStatusRef.current = rtc.status;
+  }, [rtc.status]);
 
   useEffect(() => {
     fetchMeta()
@@ -88,6 +93,11 @@ export default function App() {
         setState(event.state);
         if (event.text.trim()) {
           setTurns((t) => [...t, { role: "interviewer", text: event.text }]);
+        }
+        break;
+      case "assistant_audio":
+        if (event.audio_b64) {
+          enqueueAssistantAudio(event.audio_b64, Boolean(event.interrupt));
         }
         break;
       case "evaluating":
@@ -155,7 +165,17 @@ export default function App() {
         const history = await fetchDebugHistory(info.session_id);
         setDebugEvents(history.events.slice(-500));
       }
-      if (!meta?.avatar.ok) skipRtc();
+      if (!meta?.avatar.ok) {
+        skipRtc();
+      } else {
+        // 等 WebRTC 建连（InterviewStage mount 后会 connect），超时仍开场（浏览器 TTS 兜底）
+        const deadline = Date.now() + 10000;
+        while (Date.now() < deadline) {
+          const s = rtcStatusRef.current;
+          if (s === "connected" || s === "failed" || s === "skipped") break;
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      }
       // kickoff 走同一把 inFlight 锁：先释放再交给 run
       inFlightRef.current = false;
       await run({ kickoff: true });
@@ -181,6 +201,7 @@ export default function App() {
 
   const holdStart = useCallback(() => {
     if (inFlightRef.current || busy) return;
+    stopAssistantAudio();
     if (sessionRef.current) void interruptVoice(sessionRef.current);
     void capture.start().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [busy, capture]);

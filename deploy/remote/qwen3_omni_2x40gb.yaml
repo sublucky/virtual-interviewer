@@ -1,5 +1,6 @@
-# Qwen3-Omni 2× A100 40GB：Thinker 跨两卡 TP=2，Talker 在 GPU1，Code2Wav 在 GPU0。
-# 单卡 40GB 装不下 BF16 Thinker（约 59GB）；两卡切分后每卡约 30GB 权重。
+# Qwen3-Omni 2× A100 40GB + 社区 FP8（Thinker/Talker 量化，约 35GB）。
+# Thinker TP=2；stage0 预留必须低于 0.90，否则 Talker/Code2Wav 分进程无剩余显存。
+# 分进程启动时 CUDA_VISIBLE_DEVICES 重编号：Talker 绑物理 GPU1，Code2Wav 绑 GPU0。
 async_chunk: false
 
 connectors:
@@ -14,7 +15,7 @@ stages:
   - stage_id: 0
     devices: "0,1"
     tensor_parallel_size: 2
-    gpu_memory_utilization: 0.90
+    gpu_memory_utilization: 0.62
     max_model_len: 2048
     max_num_seqs: 1
     max_num_batched_tokens: 2048
@@ -28,7 +29,7 @@ stages:
   - stage_id: 1
     # 分进程启动时 CUDA_VISIBLE_DEVICES=1，逻辑编号为 0
     devices: "0"
-    gpu_memory_utilization: 0.12
+    gpu_memory_utilization: 0.22
     max_model_len: 4096
     max_num_seqs: 1
     max_num_batched_tokens: 4096

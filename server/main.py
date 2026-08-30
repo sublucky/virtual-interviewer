@@ -22,9 +22,11 @@ from server.interview.evaluator import Evaluator
 from server.models import CorpusEntry, CorpusStatus, InterviewConfig
 from server.pipeline import Pipeline
 from server.providers.avatar import LiveTalkingAvatar
+from server.providers.chat_tts import build_tts
 from server.providers.embedding import build_embedding
 from server.providers.llm import build_llm
 from server.providers.omni_realtime import build_omni
+from server.providers.whisper_asr import build_asr
 from server.rag.retriever import Retriever
 from server.rag.store import VectorStore
 from server.session import InterviewSession, SessionRepository
@@ -44,6 +46,8 @@ class Container:
         self.store = VectorStore(settings.rag)
         self.avatar = LiveTalkingAvatar(settings.avatar)
         self.omni = build_omni(settings.omni, debug=self.debug)
+        self.asr = build_asr(settings.whisper, debug=self.debug)
+        self.tts = build_tts(settings.chattts, debug=self.debug)
         self.retriever = Retriever(
             store=self.store, embedding=self.embedding, settings=settings.rag, debug=self.debug
         )
@@ -63,6 +67,8 @@ class Container:
             avatar=self.avatar,
             debug=self.debug,
             omni=self.omni,
+            asr=self.asr,
+            tts=self.tts if settings.chattts.enabled else None,
             voice_mode=settings.omni.voice_mode,
         )
 
@@ -74,6 +80,7 @@ class Container:
     async def shutdown(self) -> None:
         await self.avatar.aclose()
         await self.omni.aclose()
+        await self.tts.aclose()
         self.store.close()
         self.storage.close()
 
@@ -156,18 +163,26 @@ class CorpusAgentRequest(BaseModel):
 
 @app.get("/api/meta")
 async def meta(ctx: Ctx) -> dict[str, Any]:
-    llm, avatar, vector, omni = (
+    llm, avatar, vector, omni, asr, tts = (
         await ctx.llm.health(),
         await ctx.avatar.health(),
         await ctx.store.health(),
         await ctx.omni.health(),
+        await ctx.asr.health(),
+        await ctx.tts.health(),
     )
     return {
         "llm": llm.model_dump(),
         "avatar": avatar.model_dump(),
         "vector": vector.model_dump(),
         "omni": omni.model_dump(),
+        "asr": asr.model_dump(),
+        "tts": tts.model_dump(),
         "voice_mode": settings.omni.voice_mode,
+        "asr_provider": settings.whisper.model if settings.whisper.enabled else "browser",
+        "tts_provider": (
+            "chattts" if settings.chattts.enabled else ("omni" if settings.omni.enabled else "livetalking")
+        ),
         "embedding": {
             "provider": settings.rag.embedding_provider,
             "dim": settings.rag.embedding_dim,

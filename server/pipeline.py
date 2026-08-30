@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -17,6 +18,7 @@ from server.interview.evaluator import Evaluator
 from server.models import DebugEvent, SessionState
 from server.providers.llm import LLMError
 from server.providers.omni_realtime import OmniError
+from server.providers.whisper_asr import WhisperError
 from server.session import InterviewSession, SessionRepository
 
 _SENTENCE_END = re.compile(r"[。！？!?；;\n]")
@@ -36,6 +38,8 @@ class Pipeline:
         avatar: Any,
         debug: DebugEmitter,
         omni: Any = None,
+        asr: Any = None,
+        tts: Any = None,
         voice_mode: str = "text",
     ) -> None:
         self._sessions = sessions
@@ -43,6 +47,8 @@ class Pipeline:
         self._evaluator = evaluator
         self._avatar = avatar
         self._omni = omni
+        self._asr = asr
+        self._tts = tts
         self._voice_mode = voice_mode
         self._debug = debug
         self._queues: dict[str, asyncio.Queue[DebugEvent]] = {}
@@ -95,17 +101,22 @@ class Pipeline:
         audio: bytes,
         end: bool = False,
     ) -> AsyncIterator[Event]:
-        """语音回合：Omni 转写 → 写入会话 → 与文字 turn 同一条状态机。"""
+        """语音回合：ASR → LLM → TTS。
+
+        ASR 用 Whisper（本地）或 Omni 转写，LLM 走 InterviewEngine（RAG + 流式），
+        TTS 用 ChatTTS（本地）或 Omni 合成后送 LiveTalking /humanaudio 对口型。
+        """
         if end:
             async for event in self.turn(session, end=True):
                 yield event
             return
-        if self._omni is None:
+        asr = self._asr if self._asr is not None else self._omni
+        if asr is None:
             yield "error", {"message": "语音引擎未配置"}
             return
         try:
-            transcript = (await self._omni.transcribe(audio, session_id=session.id)).strip()
-        except OmniError as exc:
+            transcript = (await asr.transcribe(audio, session_id=session.id)).strip()
+        except (OmniError, WhisperError) as exc:
             yield "error", {"message": f"语音转写失败：{exc}"}
             return
         except Exception as exc:  # noqa: BLE001
@@ -161,13 +172,19 @@ class Pipeline:
                         if first_sentence_ms is None:
                             first_sentence_ms = watch.mark("first_sentence")
                         # 本轮第一次推送用 interrupt 打断上一轮残留音频
-                        await self._push(session, sentence, interrupt=not spoke_once)
+                        async for audio_event in self._push(
+                            session, sentence, interrupt=not spoke_once
+                        ):
+                            yield audio_event
                         spoke_once = True
                     continue
 
                 if kind == "done":
                     if buffer.strip():
-                        await self._push(session, buffer.strip(), interrupt=not spoke_once)
+                        async for audio_event in self._push(
+                            session, buffer.strip(), interrupt=not spoke_once
+                        ):
+                            yield audio_event
                     self._debug.latency(
                         session.id,
                         first_sentence_ms=first_sentence_ms or -1,
@@ -182,19 +199,68 @@ class Pipeline:
                 yield event
             yield "error", {"message": str(exc)}
 
-    async def _push(self, session: InterviewSession, text: str, *, interrupt: bool) -> None:
-        """把一句话推给数字人。Omni 模式先合成再 /humanaudio，失败降级内置 TTS。"""
-        if not session.rtc_session_id:
-            return
-        if self._voice_mode == "omni" and self._omni is not None:
-            if await self._push_omni_audio(session, text, interrupt=interrupt):
-                return
-        await self._push_tts(session, text, interrupt=interrupt)
+    async def _push(
+        self, session: InterviewSession, text: str, *, interrupt: bool
+    ) -> AsyncIterator[Event]:
+        """TTS → 数字人；无 RTC 时把 WAV 经 SSE 交给浏览器播放。"""
+        wav: bytes | None = None
+        if self._voice_mode == "omni":
+            wav = await self._synthesize(session, text)
 
-    async def _push_omni_audio(self, session: InterviewSession, text: str, *, interrupt: bool) -> bool:
+        if session.rtc_session_id:
+            if wav is not None:
+                if await self._deliver_avatar_audio(session, text, wav, interrupt=interrupt):
+                    return
+                # LiveTalking 推送失败：降级浏览器播放
+                yield "assistant_audio", _audio_payload(wav, interrupt=interrupt)
+                return
+            await self._push_tts(session, text, interrupt=interrupt)
+            return
+
+        if wav is not None:
+            self._debug.comm(
+                session.id,
+                target="browser",
+                action="assistant_audio",
+                took_ms=0,
+                chars=len(text),
+                bytes=len(wav),
+            )
+            yield "assistant_audio", _audio_payload(wav, interrupt=interrupt)
+
+    async def _synthesize(self, session: InterviewSession, text: str) -> bytes | None:
+        """按优先级合成：ChatTTS → Omni。"""
+        for target, engine in (("chattts", self._tts), ("omni", self._omni)):
+            if engine is None:
+                continue
+            watch = Stopwatch()
+            try:
+                wav = await engine.synthesize(text, session_id=session.id)
+                self._debug.comm(
+                    session.id,
+                    target=target,
+                    action="synthesize",
+                    took_ms=watch.elapsed_ms(),
+                    chars=len(text),
+                    bytes=len(wav),
+                )
+                return wav
+            except Exception as exc:  # noqa: BLE001
+                self._debug.comm(
+                    session.id,
+                    target=target,
+                    action="synthesize",
+                    took_ms=watch.elapsed_ms(),
+                    status="error",
+                    error=str(exc),
+                )
+        return None
+
+    async def _deliver_avatar_audio(
+        self, session: InterviewSession, text: str, wav: bytes, *, interrupt: bool
+    ) -> bool:
         watch = Stopwatch()
         try:
-            wav = await self._omni.synthesize(text, session_id=session.id)
             await self._avatar.speak_audio(session.rtc_session_id, wav, interrupt=interrupt)
             self._debug.comm(
                 session.id,
@@ -205,11 +271,11 @@ class Pipeline:
                 bytes=len(wav),
             )
             return True
-        except Exception as exc:  # noqa: BLE001 — Omni/口型失败则走内置 TTS
+        except Exception as exc:  # noqa: BLE001
             self._debug.comm(
                 session.id,
-                target="omni",
-                action="speak_audio",
+                target="livetalking",
+                action="humanaudio",
                 took_ms=watch.elapsed_ms(),
                 status="error",
                 error=str(exc),
@@ -295,3 +361,12 @@ def _take_sentence(buffer: str) -> tuple[str, str]:
         if cut > MIN_FLUSH_CHARS:
             return buffer[: cut + 1].strip(), buffer[cut + 1 :]
     return "", buffer
+
+
+def _audio_payload(wav: bytes, *, interrupt: bool) -> dict[str, Any]:
+    return {
+        "format": "wav",
+        "audio_b64": base64.b64encode(wav).decode("ascii"),
+        "interrupt": interrupt,
+        "bytes": len(wav),
+    }

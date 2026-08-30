@@ -20,7 +20,7 @@ source "${CONF}"
 : "${REMOTE_USER:?}"
 : "${REMOTE_DIR:?}"
 
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -p "${REMOTE_PORT}")
+SSH_OPTS=(-F /dev/null -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ServerAliveInterval=30 -o ConnectTimeout=15 -p "${REMOTE_PORT}")
 
 remote_ssh() {
   if [[ -n "${REMOTE_PASS:-}" ]]; then
@@ -41,14 +41,14 @@ remote_rsync() {
     rsync_rsh="sshpass -e ssh ${SSH_OPTS[*]}"
     SSHPASS="${REMOTE_PASS}" rsync -az --delete \
       -e "${rsync_rsh}" \
-      --exclude '.git' --exclude '.venv' --exclude 'web/node_modules' \
+      --exclude '.git' --exclude '.venv' --exclude '.venv-omni' --exclude 'web/node_modules' \
       --exclude 'data' --exclude 'web/dist' --exclude '.env' \
       --exclude 'deploy/server.conf' \
       "${src}" "${REMOTE_USER}@${REMOTE_HOST}:${dst}"
   else
     rsync -az --delete \
       -e "ssh ${SSH_OPTS[*]}" \
-      --exclude '.git' --exclude '.venv' --exclude 'web/node_modules' \
+      --exclude '.git' --exclude '.venv' --exclude '.venv-omni' --exclude 'web/node_modules' \
       --exclude 'data' --exclude 'web/dist' --exclude '.env' \
       --exclude 'deploy/server.conf' \
       "${src}" "${REMOTE_USER}@${REMOTE_HOST}:${dst}"
@@ -57,6 +57,6 @@ remote_rsync() {
 
 echo_cfg() {
   echo "host=${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PORT} dir=${REMOTE_DIR}"
-  echo "omni_port=${OMNI_PORT:-8091} model=${OMNI_MODEL:-Qwen/Qwen3-Omni-30B-A3B-Instruct}"
+  echo "omni_port=${OMNI_PORT:-8091} model=${OMNI_MODEL:-marksverdhei/Qwen3-Omni-30B-A3B-FP8}"
   echo "gpu thinker=${OMNI_GPU_THINKER:-0} talker=${OMNI_GPU_TALKER:-1}"
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 启动 Qwen3-Omni（Realtime 必须 --no-async-chunk）。
-# 单卡：统一进程；多卡：stage0 Thinker+API / stage1 Talker / stage2 Code2Wav。
+# 默认社区 FP8；预量化 checkpoint 不要加 --quantization fp8。
+# 单卡：统一进程；两卡：stage0 Thinker+API / stage1 Talker / stage2 Code2Wav。
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 OMNI_PORT="${OMNI_PORT:-8091}"
-OMNI_MODEL="${OMNI_MODEL:-Qwen/Qwen3-Omni-30B-A3B-Instruct}"
+OMNI_MODEL="${OMNI_MODEL:-marksverdhei/Qwen3-Omni-30B-A3B-FP8}"
 OMNI_GPU_THINKER="${OMNI_GPU_THINKER:-0}"
 OMNI_GPU_TALKER="${OMNI_GPU_TALKER:-1}"
 OMNI_MASTER_PORT="${OMNI_MASTER_PORT:-26000}"

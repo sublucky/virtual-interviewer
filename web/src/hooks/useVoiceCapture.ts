@@ -49,7 +49,7 @@ function encodeWav(pcm: Int16Array, sampleRate: number): Blob {
 }
 
 export function useVoiceCapture() {
-  const ctxRef = useRef<AudioContext | None>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const nodeRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);

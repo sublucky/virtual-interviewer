@@ -8,3 +8,8 @@ qdrant-client>=1.12.0
 PyYAML>=6.0.2
 python-multipart>=0.0.12
 websockets>=14.0
+faster-whisper>=1.1.0
+# 本地 TTS（依赖 torch，体积较大；用 Omni 合成时可注释掉）
+ChatTTS>=0.2.0
+# ChatTTS 0.2.x 漏声明的依赖
+requests>=2.32.0

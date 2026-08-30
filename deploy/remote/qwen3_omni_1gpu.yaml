@@ -1,5 +1,5 @@
-# Qwen3-Omni 单卡 A100 40GB：Thinker / Talker / Code2Wav 都绑 GPU 0。
-# 官方 qwen3_omni_moe.yaml 默认 stage1/2 在 cuda:1，且 context 65536，40GB 会 OOM。
+# Qwen3-Omni 单卡：Thinker / Talker / Code2Wav 都绑 GPU 0。
+# BF16 Thinker 约 59GB，40GB 卡必须用 FP8；官方默认 stage1/2 在 cuda:1 且 context 过长。
 async_chunk: false
 
 connectors:

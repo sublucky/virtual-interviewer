@@ -55,12 +55,40 @@ class AvatarSettings:
 
 
 @dataclass(frozen=True)
+class WhisperSettings:
+    """本地 Whisper ASR。"""
+
+    enabled: bool = field(default_factory=lambda: _env("ASR_PROVIDER", "").lower() == "whisper")
+    model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "base"))
+    device: str = field(default_factory=lambda: _env("WHISPER_DEVICE", "auto"))
+    compute_type: str = field(default_factory=lambda: _env("WHISPER_COMPUTE_TYPE", "int8"))
+    language: str = field(default_factory=lambda: _env("WHISPER_LANGUAGE", "zh"))
+    beam_size: int = field(default_factory=lambda: int(_env("WHISPER_BEAM_SIZE", "5")))
+
+
+@dataclass(frozen=True)
+class ChatTTSSettings:
+    """本地 ChatTTS 语音合成。"""
+
+    enabled: bool = field(default_factory=lambda: _env("TTS_PROVIDER", "").lower() == "chattts")
+    source: str = field(default_factory=lambda: _env("CHATTTS_SOURCE", "huggingface").lower())
+    local_path: str = field(default_factory=lambda: _env("CHATTTS_LOCAL_PATH"))
+    device: str = field(default_factory=lambda: _env("CHATTTS_DEVICE"))
+    speaker_emb: str = field(
+        default_factory=lambda: _env("CHATTTS_SPEAKER_EMB", "./assets/audio/interviewer_spk_emb.txt")
+    )
+    compile: bool = field(default_factory=lambda: _flag("CHATTTS_COMPILE", False))
+    skip_refine: bool = field(default_factory=lambda: _flag("CHATTTS_SKIP_REFINE", False))
+    temperature: float = field(default_factory=lambda: float(_env("CHATTTS_TEMPERATURE", "0.3")))
+
+
+@dataclass(frozen=True)
 class OmniSettings:
     """Qwen3-Omni：Realtime WS + chat/completions 音频备用。"""
 
     voice_mode: str = field(default_factory=lambda: _env("VOICE_MODE", "text").lower())
     api_base: str = field(default_factory=lambda: _env("OMNI_API_BASE", "http://127.0.0.1:8091").rstrip("/"))
-    model: str = field(default_factory=lambda: _env("OMNI_MODEL", "Qwen/Qwen3-Omni-30B-A3B-Instruct"))
+    model: str = field(default_factory=lambda: _env("OMNI_MODEL", "marksverdhei/Qwen3-Omni-30B-A3B-FP8"))
     speaker: str = field(default_factory=lambda: _env("OMNI_SPEAKER", "chelsie"))
     timeout: float = 90.0
 
@@ -113,6 +141,8 @@ class Settings:
 
     llm: LLMSettings = field(default_factory=LLMSettings)
     avatar: AvatarSettings = field(default_factory=AvatarSettings)
+    whisper: WhisperSettings = field(default_factory=WhisperSettings)
+    chattts: ChatTTSSettings = field(default_factory=ChatTTSSettings)
     omni: OmniSettings = field(default_factory=OmniSettings)
     rag: RAGSettings = field(default_factory=RAGSettings)
 

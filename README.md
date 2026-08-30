@@ -8,7 +8,7 @@
 
 当前状态：**代码基础架构已搭好**。全链路编排、状态机、RAG、Debug 子系统可用，
 LLM 与数字人通过配置接入。默认 `VOICE_MODE=text`（浏览器 Web Speech + LiveTalking 内置 TTS）；
-`VOICE_MODE=omni` 时走 Qwen3-Omni Realtime 转写 + 口播音频驱动数字人对口型。
+`VOICE_MODE=omni` 时走 **ASR → LLM → TTS** 三段式：Whisper 转写 → RAG/LLM 流式生成 → ChatTTS 合成（Omni 兜底）→ LiveTalking /humanaudio 对口型。
 
 ## 快速开始
 
@@ -44,9 +44,13 @@ make ingest-http       # 对已启动的后端发 HTTP（服务占用内嵌 Qdra
 | `EMBEDDING_PROVIDER` | `hash`（离线开发）/ `bge-m3`（本地）/ `dashscope`（远程） |
 | `QDRANT_URL` | 留空则用内嵌 Qdrant（本地文件，无需 Docker） |
 | `DEBUG_DEFAULT` | Debug 模式默认开关，会话可单独覆盖 |
-| `VOICE_MODE` | `text`（默认）或 `omni` |
+| `VOICE_MODE` | `text`（默认）或 `omni`（ASR → LLM → TTS） |
+| `ASR_PROVIDER` | `whisper`（本地 faster-whisper）或留空用浏览器 |
+| `WHISPER_MODEL` / `WHISPER_DEVICE` | 默认 `base` / `auto` |
+| `TTS_PROVIDER` | `chattts`（本地 ChatTTS）或留空用 Omni 合成兜底 |
+| `CHATTTS_SPEAKER_EMB` | 面试官音色文件，首次随机采样后落盘复用（默认 `./assets/audio/interviewer_spk_emb.txt`） |
 | `OMNI_API_BASE` | Qwen3-Omni 地址，如 `http://127.0.0.1:8091` 或隧道后的本机端口 |
-| `OMNI_MODEL` / `OMNI_SPEAKER` | 默认为 `Qwen/Qwen3-Omni-30B-A3B-Instruct` / `chelsie` |
+| `OMNI_MODEL` / `OMNI_SPEAKER` | 默认为社区 FP8 `marksverdhei/Qwen3-Omni-30B-A3B-FP8` / `chelsie` |
 
 私有化 GPU 服务器的地址与凭证放在 `deploy/server.conf`（已被 gitignore），
 模板见 `deploy/server.conf.example`。
@@ -62,25 +66,31 @@ chmod +x deploy/remote/*.sh
 ./deploy/remote/sync.sh            # rsync 代码到 REMOTE_DIR（不含凭证）
 HF_ENDPOINT=https://hf-mirror.com ./deploy/remote/setup_omni.sh
 ./deploy/remote/start_omni.sh      # 等待 /v1/models
+./deploy/remote/setup_livetalking.sh
+./deploy/remote/prepare_avatar.sh  # 用 assets/.../interviewer_female_01_silence.mp4 生成形象
 ./deploy/remote/start_livetalking.sh
 ./deploy/remote/status.sh
 ```
 
-本机隧道（Omni 未对公网开放时）：
+本机隧道（Omni / LiveTalking 未对公网开放时）：
 
 ```bash
-ssh -L 8091:127.0.0.1:8091 -p 21624 vipuser@<gpu-host>
+ssh -L 8091:127.0.0.1:8091 -L 8010:127.0.0.1:8010 -p <port> vipuser@<gpu-host>
 # .env
 # VOICE_MODE=omni
 # OMNI_API_BASE=http://127.0.0.1:8091
+# LIVETALKING_BASE=http://127.0.0.1:8010
+# AVATAR_ID=interviewer_female_01
 ```
+
+> WebRTC 口型拉流依赖 UDP。若仅 TCP 隧道能通信令但画面黑屏，需把远端 `8010/UDP` 对浏览器可达，或在同一局域网访问。
 
 Realtime 烟测（官方客户端，需 16kHz mono PCM16 wav）：
 
 ```bash
 python examples/online_serving/qwen3_omni/openai_realtime_client.py \
   --url ws://127.0.0.1:8091/v1/realtime \
-  --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
+  --model marksverdhei/Qwen3-Omni-30B-A3B-FP8 \
   --input-wav input_16k_mono.wav \
   --output-wav realtime_output.wav
 ```
@@ -88,9 +98,10 @@ python examples/online_serving/qwen3_omni/openai_realtime_client.py \
 验收：远端 `/v1/models` OK → 本机 realtime 出 wav → 面试开场数字人出声/口型 →
 用户按住说话后出现转写并进入下一问 → Omni 挂掉时 Setup 显示降级、文字面试不崩。
 
-显存：当前探测为 **1× A100 40GB**，`start_omni.sh` 会走单卡统一进程；两卡及以上才分 stage。
-30B-A3B + LiveTalking 可能争抢显存，LiveTalking 优先 ultralight 或错开卡。
-首次拉权重很慢，脚本支持 `HF_ENDPOINT` 镜像与断点续传。磁盘建议预留 ≥80GB。
+显存：官方 BF16 Thinker 约 59GB，**2× A100 40GB 装不下全链路**，默认改用社区 FP8（约 35GB，Thinker+Talker 量化）。
+`start_omni.sh`：单卡走统一进程；两卡分 stage（Thinker TP=2，Talker / Code2Wav 错开）。
+LiveTalking 可能与 Omni 争显存，优先 ultralight 或错开卡。
+首次拉权重很慢，脚本支持 `HF_ENDPOINT` 镜像与断点续传。FP8 磁盘约 40GB，同时保留 BF16 缓存则需 ≥110GB。
 
 用 `GET /api/meta` 确认各依赖是否就绪：
 
