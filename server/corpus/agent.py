@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 
 from server.models import CorpusEntry, CorpusKind, utc_now
-from server.providers.llm import LLMClient
+from server.providers.llm import ChatLLM
 
 SYSTEM = """你是资深技术面试官兼题库编辑。你要为指定岗位产出高质量面试语料。
 要求：
@@ -39,7 +39,7 @@ TEMPLATE = """岗位：{role}
 
 
 class CorpusAgent:
-    def __init__(self, llm: LLMClient) -> None:
+    def __init__(self, llm: ChatLLM) -> None:
         self._llm = llm
 
     async def generate(

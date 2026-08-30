@@ -5,15 +5,21 @@ interface Props {
   state: string;
   turns: Turn[];
   streaming: string;
+  thinking: boolean;
   rtcStatus: string;
   rtcError: string;
   micSupported: boolean;
   listening: boolean;
   partial: string;
   busy: boolean;
+  enableRtc: boolean;
+  voiceMode: boolean;
+  recording: boolean;
   onConnectVideo: (video: HTMLVideoElement) => void;
   onSubmit: (text: string) => void;
   onToggleMic: () => void;
+  onHoldStart: () => void;
+  onHoldEnd: () => void;
   onEnd: () => void;
 }
 
@@ -24,16 +30,24 @@ export function InterviewStage(props: Props) {
   const [draft, setDraft] = useState("");
 
   const connect = props.onConnectVideo;
+  const enableRtc = props.enableRtc;
   useEffect(() => {
-    // StrictMode 下 effect 会跑两次，用标记保证只建一条 PeerConnection
-    if (connectedRef.current || !videoRef.current) return;
+    if (!enableRtc || connectedRef.current || !videoRef.current) return;
     connectedRef.current = true;
     connect(videoRef.current);
-  }, [connect]);
+  }, [connect, enableRtc]);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
   }, [props.turns.length, props.streaming]);
+
+  const caption = props.thinking ? "面试官正在组织下一个问题…" : props.streaming || "—";
+  const rtcLabel =
+    props.rtcStatus === "connecting"
+      ? "数字人连接中…"
+      : props.rtcStatus === "skipped"
+        ? "未启用数字人，当前为文字模式"
+        : "未连接数字人，当前为文字模式";
 
   return (
     <section className="stage">
@@ -41,14 +55,14 @@ export function InterviewStage(props: Props) {
         <video ref={videoRef} autoPlay playsInline />
         {props.rtcStatus !== "connected" && (
           <div className="video-fallback">
-            {props.rtcStatus === "connecting" ? "数字人连接中…" : "未连接数字人，当前为文字模式"}
+            {rtcLabel}
             {props.rtcError && <small>{props.rtcError}</small>}
           </div>
         )}
-        <div className="caption">{props.streaming || "—"}</div>
+        <div className="caption">{caption}</div>
       </div>
 
-      <div className="transcript" ref={transcriptRef}>
+      <div className="transcript" ref={transcriptRef} aria-live="polite">
         {props.turns.map((turn, i) => (
           <div key={i} className={`turn ${turn.role}`}>
             <span>{turn.role === "interviewer" ? "面试官" : "我"}</span>
@@ -56,7 +70,7 @@ export function InterviewStage(props: Props) {
           </div>
         ))}
         {props.streaming && (
-          <div className="turn interviewer">
+          <div className="turn interviewer streaming">
             <span>面试官</span>
             <p>{props.streaming}</p>
           </div>
@@ -75,9 +89,16 @@ export function InterviewStage(props: Props) {
       >
         <textarea
           rows={2}
-          value={props.listening ? props.partial || "（正在听…）" : draft}
-          readOnly={props.listening}
-          placeholder="输入回答，或点麦克风口述"
+          value={props.recording ? "（按住说话中…）" : props.listening ? props.partial || "（正在听…）" : draft}
+          readOnly={props.listening || props.recording}
+          disabled={props.busy || props.recording}
+          placeholder={
+            props.busy
+              ? "面试官发言中…"
+              : props.voiceMode
+                ? "按住说话作答，也可在此输入文字"
+                : "输入回答，或点麦克风口述"
+          }
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -87,16 +108,35 @@ export function InterviewStage(props: Props) {
           }}
         />
         <div className="composer-actions">
-          {props.micSupported && (
+          {props.voiceMode ? (
             <button
               type="button"
-              className={props.listening ? "mic active" : "mic"}
-              onClick={props.onToggleMic}
+              className={props.recording ? "talk recording" : "talk"}
+              disabled={props.busy}
+              onContextMenu={(e) => e.preventDefault()}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                props.onHoldStart();
+              }}
+              onPointerUp={props.onHoldEnd}
+              onPointerCancel={props.onHoldEnd}
             >
-              {props.listening ? "停止" : "口述"}
+              {props.recording ? "松开结束并发送" : "按住说话"}
             </button>
+          ) : (
+            props.micSupported && (
+              <button
+                type="button"
+                className={props.listening ? "mic active" : "mic"}
+                onClick={props.onToggleMic}
+                disabled={props.busy}
+              >
+                {props.listening ? "停止" : "口述"}
+              </button>
+            )
           )}
-          <button type="submit" disabled={props.busy || !draft.trim()}>
+          <button type="submit" disabled={props.busy || props.recording || !draft.trim()}>
             发送
           </button>
           <button type="button" className="ghost" onClick={props.onEnd} disabled={props.busy}>

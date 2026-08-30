@@ -1,35 +1,89 @@
-import { useCallback, useRef, useState } from "react";
-import { createSession, streamTurn } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createSession,
+  fetchDebugHistory,
+  fetchMeta,
+  interruptVoice,
+  reportFromEvent,
+  streamTurn,
+  streamVoiceTurn,
+  toggleDebug,
+} from "./api";
+import { CorpusAdmin } from "./components/CorpusAdmin";
 import { DebugPanel } from "./components/DebugPanel";
 import { InterviewStage } from "./components/InterviewStage";
 import { ReportView } from "./components/ReportView";
 import { SetupForm } from "./components/SetupForm";
 import { useSpeech } from "./hooks/useSpeech";
+import { useVoiceCapture } from "./hooks/useVoiceCapture";
 import { useWebRTC } from "./hooks/useWebRTC";
-import type { DebugEvent, InterviewConfig, Report, StreamEvent, Turn } from "./types";
+import type {
+  DebugEvent,
+  InterviewConfig,
+  Report,
+  ServiceMeta,
+  StreamEvent,
+  Turn,
+} from "./types";
 
-type Phase = "setup" | "interview" | "report";
+type Phase = "setup" | "interview" | "report" | "corpus";
+
+const EMPTY_CONFIG: InterviewConfig = {
+  role: "后端工程师",
+  company: "",
+  jd: "",
+  resume: "",
+  style: "probe",
+  rounds: 8,
+  debug: true,
+};
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("setup");
+  const [meta, setMeta] = useState<ServiceMeta | null>(null);
+  const [config, setConfig] = useState<InterviewConfig>(EMPTY_CONFIG);
   const [sessionId, setSessionId] = useState("");
   const [debugOn, setDebugOn] = useState(false);
   const [state, setState] = useState("Created");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [streaming, setStreaming] = useState("");
+  const [thinking, setThinking] = useState(false);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const rtc = useWebRTC();
   const sessionRef = useRef("");
+  const inFlightRef = useRef(false);
+  const skipRtc = rtc.skip;
+  const connectRtc = rtc.connect;
+
+  useEffect(() => {
+    fetchMeta()
+      .then(setMeta)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const patchConfig = useCallback((next: Partial<InterviewConfig>) => {
+    setConfig((c) => ({ ...c, ...next }));
+  }, []);
 
   const handleEvent = useCallback((event: StreamEvent) => {
     switch (event.event) {
+      case "transcript":
+        if (event.text.trim()) {
+          setTurns((t) => [...t, { role: "candidate", text: event.text }]);
+        }
+        break;
+      case "thinking":
+        setThinking(true);
+        break;
       case "delta":
+        setThinking(false);
         setStreaming((s) => s + event.text);
         break;
       case "done":
+        setThinking(false);
         setStreaming("");
         setState(event.state);
         if (event.text.trim()) {
@@ -37,17 +91,24 @@ export default function App() {
         }
         break;
       case "evaluating":
+        setThinking(false);
         setState("Evaluating");
         break;
-      case "report":
-        setReport(event as unknown as Report);
+      case "report": {
+        const next = reportFromEvent(event);
+        if (next) setReport(next);
         setState("Done");
         setPhase("report");
         break;
+      }
       case "debug":
         setDebugEvents((events) => [...events, event as unknown as DebugEvent].slice(-500));
+        if (event.type === "state_change" && typeof event.to === "string") {
+          setState(event.to);
+        }
         break;
       case "error":
+        setThinking(false);
         setError(event.message);
         break;
       default:
@@ -57,6 +118,8 @@ export default function App() {
 
   const run = useCallback(
     async (payload: { text?: string; kickoff?: boolean; end?: boolean }) => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
       setBusy(true);
       setError("");
       try {
@@ -64,41 +127,93 @@ export default function App() {
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
+        inFlightRef.current = false;
         setBusy(false);
+        setThinking(false);
       }
     },
     [handleEvent],
   );
 
-  const start = useCallback(
-    async (config: InterviewConfig) => {
-      setBusy(true);
-      setError("");
-      try {
-        const info = await createSession(config);
-        sessionRef.current = info.session_id;
-        setSessionId(info.session_id);
-        setDebugOn(info.debug);
-        setState(info.state);
-        setPhase("interview");
-        await run({ kickoff: true });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        setBusy(false);
+  const start = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setBusy(true);
+    setError("");
+    setTurns([]);
+    setDebugEvents([]);
+    setStreaming("");
+    setThinking(false);
+    try {
+      const info = await createSession(config);
+      sessionRef.current = info.session_id;
+      setSessionId(info.session_id);
+      setDebugOn(info.debug);
+      setState(info.state);
+      setPhase("interview");
+      if (info.debug) {
+        const history = await fetchDebugHistory(info.session_id);
+        setDebugEvents(history.events.slice(-500));
       }
-    },
-    [run],
-  );
+      if (!meta?.avatar.ok) skipRtc();
+      // kickoff 走同一把 inFlight 锁：先释放再交给 run
+      inFlightRef.current = false;
+      await run({ kickoff: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      inFlightRef.current = false;
+      setBusy(false);
+    }
+  }, [config, meta, run, skipRtc]);
 
   const submit = useCallback(
     (text: string) => {
+      if (inFlightRef.current || busy) return;
       setTurns((t) => [...t, { role: "candidate", text }]);
       void run({ text });
     },
-    [run],
+    [busy, run],
   );
 
   const speech = useSpeech(submit);
+  const capture = useVoiceCapture();
+  const voiceOmni = meta?.voice_mode === "omni";
+
+  const holdStart = useCallback(() => {
+    if (inFlightRef.current || busy) return;
+    if (sessionRef.current) void interruptVoice(sessionRef.current);
+    void capture.start().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, [busy, capture]);
+
+  const holdEnd = useCallback(async () => {
+    const blob = await capture.stop();
+    if (!blob || inFlightRef.current || !sessionRef.current) return;
+    inFlightRef.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await streamVoiceTurn(sessionRef.current, blob, handleEvent);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      inFlightRef.current = false;
+      setBusy(false);
+      setThinking(false);
+    }
+  }, [capture, handleEvent]);
+
+  const handleToggleDebug = useCallback(
+    async (enabled: boolean) => {
+      if (!sessionRef.current) return;
+      await toggleDebug(sessionRef.current, enabled);
+      setDebugOn(enabled);
+      if (enabled) {
+        const history = await fetchDebugHistory(sessionRef.current);
+        setDebugEvents(history.events.slice(-500));
+      }
+    },
+    [],
+  );
 
   const restart = () => {
     rtc.disconnect();
@@ -108,30 +223,66 @@ export default function App() {
     setDebugEvents([]);
     setReport(null);
     setStreaming("");
+    setThinking(false);
+    setError("");
     setPhase("setup");
+    fetchMeta().then(setMeta).catch(() => undefined);
   };
 
+  const connectVideo = useCallback(
+    (video: HTMLVideoElement) => {
+      void connectRtc(sessionId, video);
+    },
+    [connectRtc, sessionId],
+  );
+  const enableRtc = Boolean(meta?.avatar.ok) && phase === "interview" && Boolean(sessionId);
+
   return (
-    <main className={debugOn && phase !== "setup" ? "app with-debug" : "app"}>
+    <main className={debugOn && phase !== "setup" && phase !== "corpus" ? "app with-debug" : "app"}>
       <div className="main-col">
         {error && <div className="error">{error}</div>}
 
-        {phase === "setup" && <SetupForm busy={busy} onStart={start} />}
+        {phase === "setup" && (
+          <SetupForm
+            busy={busy}
+            meta={meta}
+            config={config}
+            onChange={patchConfig}
+            onStart={() => void start()}
+            onOpenCorpus={() => setPhase("corpus")}
+          />
+        )}
+
+        {phase === "corpus" && (
+          <CorpusAdmin
+            presets={meta?.presets ?? []}
+            onBack={() => {
+              setPhase("setup");
+              fetchMeta().then(setMeta).catch(() => undefined);
+            }}
+          />
+        )}
 
         {phase === "interview" && (
           <InterviewStage
             state={state}
             turns={turns}
             streaming={streaming}
+            thinking={thinking}
             rtcStatus={rtc.status}
             rtcError={rtc.error}
             micSupported={speech.supported}
             listening={speech.listening}
             partial={speech.partial}
             busy={busy}
-            onConnectVideo={(video) => void rtc.connect(sessionId, video)}
+            enableRtc={enableRtc}
+            voiceMode={voiceOmni}
+            recording={capture.recording}
+            onConnectVideo={connectVideo}
             onSubmit={submit}
             onToggleMic={() => (speech.listening ? speech.stop() : speech.start())}
+            onHoldStart={holdStart}
+            onHoldEnd={() => void holdEnd()}
             onEnd={() => void run({ end: true })}
           />
         )}
@@ -139,7 +290,9 @@ export default function App() {
         {phase === "report" && report && <ReportView report={report} onRestart={restart} />}
       </div>
 
-      {debugOn && phase !== "setup" && <DebugPanel events={debugEvents} state={state} />}
+      {debugOn && phase !== "setup" && (
+        <DebugPanel events={debugEvents} state={state} onToggle={(enabled) => void handleToggleDebug(enabled)} />
+      )}
     </main>
   );
 }

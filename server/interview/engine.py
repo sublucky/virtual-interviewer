@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from server.config import RAGSettings
 from server.debug import DebugEmitter, Stopwatch
 from server.interview import prompts
-from server.providers.llm import LLMClient
+from server.providers.llm import ChatLLM
 from server.rag.retriever import Retriever, format_context
 from server.session import InterviewSession
 
@@ -20,7 +20,7 @@ class InterviewEngine:
     def __init__(
         self,
         *,
-        llm: LLMClient,
+        llm: ChatLLM,
         retriever: Retriever,
         rag: RAGSettings,
         debug: DebugEmitter,

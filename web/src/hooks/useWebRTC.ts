@@ -1,18 +1,30 @@
 import { useCallback, useRef, useState } from "react";
 import { openRtc } from "../api";
 
-type Status = "idle" | "connecting" | "connected" | "failed";
+type Status = "idle" | "connecting" | "connected" | "failed" | "skipped";
 
 /**
  * WHEP 拉流：只收数字人的音视频，不推本地流。
- * 连接失败不阻塞面试，上层退化为纯文本模式。
+ * 连接失败或未启用数字人时不阻塞面试，上层退化为纯文本模式。
  */
 export function useWebRTC() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
 
+  const disconnect = useCallback(() => {
+    pcRef.current?.close();
+    pcRef.current = null;
+    setStatus("idle");
+    setError("");
+  }, []);
+
   const connect = useCallback(async (sessionId: string, video: HTMLVideoElement) => {
+    if (!sessionId) {
+      setStatus("skipped");
+      return;
+    }
+    pcRef.current?.close();
     setStatus("connecting");
     setError("");
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
@@ -28,24 +40,29 @@ export function useWebRTC() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await waitForIce(pc);
+      if (pcRef.current !== pc) return;
       const answer = await openRtc(sessionId, pc.localDescription!.sdp);
+      if (pcRef.current !== pc) return;
       await pc.setRemoteDescription({ type: "answer", sdp: answer });
       setStatus("connected");
     } catch (e) {
-      pc.close();
-      pcRef.current = null;
-      setStatus("failed");
-      setError(e instanceof Error ? e.message : String(e));
+      if (pcRef.current === pc) {
+        pc.close();
+        pcRef.current = null;
+        setStatus("failed");
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
   }, []);
 
-  const disconnect = useCallback(() => {
+  const skip = useCallback(() => {
     pcRef.current?.close();
     pcRef.current = null;
-    setStatus("idle");
+    setStatus("skipped");
+    setError("");
   }, []);
 
-  return { status, error, connect, disconnect };
+  return { status, error, connect, disconnect, skip };
 }
 
 function waitForIce(pc: RTCPeerConnection, timeoutMs = 3000): Promise<void> {
@@ -57,7 +74,6 @@ function waitForIce(pc: RTCPeerConnection, timeoutMs = 3000): Promise<void> {
     };
     const check = () => pc.iceGatheringState === "complete" && done();
     pc.addEventListener("icegatheringstatechange", check);
-    // 收集不全也要继续，避免弱网下卡在这一步
     setTimeout(done, timeoutMs);
   });
 }

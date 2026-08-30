@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Protocol
 
 from openai import APIError, AsyncOpenAI
 
@@ -244,3 +245,163 @@ def _parse_json(raw: str) -> dict[str, Any]:
     if start == -1 or end <= start:
         raise LLMError(f"模型未返回 JSON：{text[:240]}")
     return json.loads(text[start : end + 1])
+
+
+class ChatLLM(Protocol):
+    """面试引擎 / 评估 / 语料 Agent 共用的最小接口，便于 mock 替换。"""
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[tuple[str, str]]: ...
+
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1800,
+        temperature: float = 0.3,
+    ) -> dict[str, Any]: ...
+
+    async def health(self) -> HealthStatus: ...
+
+
+_MOCK_OPENING = "你好，我是今天的面试官。我们大概聊四十分钟，先从项目开始。请先简单介绍一下你最近负责的系统。"
+_MOCK_WRAP = "感谢你的分享。后续我们会内部讨论，一周内给你结果。你有什么想问我的吗？"
+_MOCK_FOLLOWUPS = [
+    "你提到这个系统，当时的流量和数据量具体是多少？",
+    "明白了。那你为什么选择现在这套方案，而不是更简单的替代？",
+    "好的。请再说一个你在这个项目里踩过的坑，以及后来怎么防复发。",
+]
+
+
+class MockLLM:
+    """本地前端联调：按脚本逐字流式吐字，不访问真实模型。
+
+    按最后一条用户指令选开场/追问/收尾，避免多会话共享计数器导致串台。
+    """
+
+    def __init__(self) -> None:
+        self._follow = 0
+
+    async def stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[tuple[str, str]]:
+        _ = max_tokens, temperature
+        reply = self._pick_reply(messages)
+        yield "thinking", ""
+        for char in reply:
+            await asyncio.sleep(0.012)
+            yield "delta", char
+
+    def _pick_reply(self, messages: list[dict[str, str]]) -> str:
+        last = next((m.get("content") or "" for m in reversed(messages) if m.get("role") == "user"), "")
+        if "现在开始面试" in last:
+            return _MOCK_OPENING
+        if "面试轮次已到" in last:
+            return _MOCK_WRAP
+        reply = _MOCK_FOLLOWUPS[self._follow % len(_MOCK_FOLLOWUPS)]
+        self._follow += 1
+        return reply
+
+    async def complete_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1800,
+        temperature: float = 0.3,
+    ) -> dict[str, Any]:
+        _ = max_tokens, temperature
+        blob = "\n".join(m.get("content") or "" for m in messages)
+        if "题库编辑" in blob or "需要生成条数" in blob:
+            return _mock_corpus_entries(blob)
+        return {
+            "overall": 72,
+            "recommendation": "lean_hire",
+            "level_guess": "高级工程师",
+            "dimensions": [
+                {"name": "技术深度", "score": 4, "note": "能讲清取舍，但量化证据偏少"},
+                {"name": "工程实践", "score": 3, "note": "有规范意识，落地细节可再追"},
+                {"name": "问题解决", "score": 4, "note": "排查路径清楚"},
+                {"name": "沟通表达", "score": 4, "note": "结构完整"},
+                {"name": "岗位匹配", "score": 3, "note": "本场覆盖面一般"},
+            ],
+            "strengths": ["能量化问题规模", "有复盘意识"],
+            "risks": ["分布式场景本场未覆盖"],
+            "evidence": [{"quote": "流量大概三千", "why": "说明有真实容量认知"}],
+            "next_round_focus": ["分布式事务与一致性"],
+            "summary": "基础扎实，深度尚可，建议进入下一轮。",
+        }
+
+    async def health(self) -> HealthStatus:
+        return HealthStatus(ok=True, extra={"provider": "mock", "model": "mock-interviewer"})
+
+
+def _mock_corpus_entries(blob: str) -> dict[str, Any]:
+    """为语料 Agent 提供可入库的 mock 草稿（本地联调不依赖真实模型）。"""
+    role = "通用"
+    topic = "综合"
+    count = 3
+    for line in blob.splitlines():
+        if line.startswith("岗位："):
+            role = line.split("：", 1)[1].strip() or role
+        elif line.startswith("主题："):
+            topic = line.split("：", 1)[1].strip() or topic
+        elif line.startswith("需要生成条数："):
+            try:
+                count = max(1, min(10, int(line.split("：", 1)[1].strip())))
+            except ValueError:
+                pass
+
+    templates = [
+        (
+            "结合{topic}，请讲一个你做过的真实案例：目标是什么，最大难点在哪，最终如何验证？",
+            "及格：有完整案例；优秀：有量化目标、取舍与验证手段。",
+            "按 STAR：背景 → 难点 → 方案取舍 → 指标结果。",
+        ),
+        (
+            "在{topic}场景下，如果出现性能或效果回退，你会如何定位并做止血？",
+            "及格：有排查步骤；优秀：有监控、回滚/降级与防复发机制。",
+            "先确认变更窗口，再看核心指标，再定位依赖，最后止血并复盘。",
+        ),
+        (
+            "围绕{topic}，你如何在交付速度与长期可维护性之间做权衡？",
+            "及格：能说出取舍；优秀：有明确标准、风险清单与补齐计划。",
+            "定义 MVP 成功标准与非目标，记录技术债与补齐时间盒。",
+        ),
+        (
+            "请评价一种常见的{topic}方案，说明它适用与不适用的边界。",
+            "及格：知道优缺点；优秀：能结合容量、成本、团队能力谈边界。",
+            "适用条件、失败模式、替代方案各给一条。",
+        ),
+        (
+            "如果让你从零搭建与{topic}相关的最小可行体系，第一周做什么？",
+            "及格：有步骤；优秀：有里程碑、验收指标与风险预案。",
+            "先定指标与数据，再做最小链路，最后补监控与回滚。",
+        ),
+    ]
+    entries = []
+    for i in range(count):
+        content_t, rubric_t, answer_t = templates[i % len(templates)]
+        entries.append(
+            {
+                "content": content_t.format(topic=topic),
+                "tags": [topic, role, "agent-mock"],
+                "rubric": rubric_t,
+                "reference_answer": answer_t,
+            }
+        )
+    return {"entries": entries}
+
+
+def build_llm(settings: LLMSettings) -> ChatLLM:
+    if settings.provider == "mock":
+        return MockLLM()
+    return LLMClient(settings)

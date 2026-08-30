@@ -12,6 +12,9 @@ entries:
     rubric: |
       及格：知道看 Network/Performance 面板；
       优秀：能按 LCP/FCP/TBT 指标拆解，区分网络、解析、渲染阶段，并有量化收益。
+    reference_answer: |
+      用 Lighthouse/Performance 看 LCP 元素；拆分包体积、关键 CSS、图片与接口；
+      用预加载/SSR/骨架屏改善体感，并给出前后对比数据。
 
   - id: seed-fe-state
     tags: [React, 状态管理, 架构]
@@ -19,6 +22,9 @@ entries:
     rubric: |
       及格：知道提升状态、用 context；
       优秀：能说清 context 的重渲染代价、选择性订阅、memo/useMemo 的适用边界。
+    reference_answer: |
+      高频状态避免放巨大 context；拆分 store 或用外部状态库做细粒度订阅；
+      列表项用 memo，派生数据用 selector。
 
   - id: seed-fe-realtime
     tags: [WebRTC, WebSocket, 实时]
@@ -26,3 +32,49 @@ entries:
     rubric: |
       及格：提到重连；
       优秀：讲清连接状态机、码率自适应、音频优先、以及超时与用户提示策略。
+    reference_answer: |
+      连接分 connecting/connected/reconnecting；弱网降分辨率或保音频；
+      超时提示并可回退到文字模式。
+
+  - id: seed-fe-security
+    tags: [安全, XSS, CSRF]
+    content: 前端如何防范 XSS？如果必须渲染富文本，你会怎么做？
+    rubric: |
+      及格：提到转义；
+      优秀：区分存储型/反射型、CSP、sanitize 白名单，以及危险 API 的禁用策略。
+    reference_answer: |
+      默认文本转义；富文本走白名单 sanitize；配 CSP；避免 innerHTML 拼接不可信输入。
+
+  - id: seed-fe-bundle
+    tags: [工程化, 构建, 性能]
+    content: 你们前端包体积是怎么治理的？上线前如何防止体积回退？
+    rubric: |
+      及格：知道 code split、tree shaking；
+      优秀：有预算门槛、分析工具、依赖准入与 CI 卡点。
+    reference_answer: |
+      路由级拆包；分析 bundle；大依赖按需引入；CI 设置体积阈值阻断。
+
+  - id: seed-fe-a11y
+    tags: [无障碍, 体验]
+    content: 做一个复杂表单时，你会如何兼顾可访问性与交互效率？
+    rubric: |
+      及格：知道 label 与键盘操作；
+      优秀：能谈 focus 管理、错误播报、aria 语义与真实用户场景。
+    reference_answer: |
+      每个控件有关联 label；错误用 aria-live；弹层管理焦点陷阱；支持完整键盘路径。
+
+  - id: seed-fe-rubric
+    kind: rubric
+    tags: [评分标准]
+    content: 前端候选人评分维度与档位定义。
+    rubric: |
+      技术深度：只会框架 API=2；懂浏览器原理=3；能讲清取舍=4；有量化优化案例=5。
+      工程能力：能写页面=2；有组件规范=3；能建工具链/规范=4；推动团队提效=5。
+      体验意识：只做功能=2；关注基础交互=3；能量化体验指标=4；兼顾无障碍与边界=5。
+
+  - id: seed-fe-knowledge-perf
+    kind: knowledge
+    tags: [性能, 面经]
+    content: |
+      前端性能追问顺序：先要指标（LCP/INP/CLS）→ 再要瓶颈证据 → 再要改动与收益。
+      候选人若只说「用了懒加载」却给不出前后数据，继续追量化。

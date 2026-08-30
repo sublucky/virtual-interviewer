@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,7 +23,8 @@ from server.models import CorpusEntry, CorpusStatus, InterviewConfig
 from server.pipeline import Pipeline
 from server.providers.avatar import LiveTalkingAvatar
 from server.providers.embedding import build_embedding
-from server.providers.llm import LLMClient
+from server.providers.llm import build_llm
+from server.providers.omni_realtime import build_omni
 from server.rag.retriever import Retriever
 from server.rag.store import VectorStore
 from server.session import InterviewSession, SessionRepository
@@ -36,12 +37,13 @@ class Container:
     def __init__(self) -> None:
         self.debug = DebugEmitter(default_enabled=settings.debug_default)
         self.storage = Storage(settings.sqlite_path)
-        self.llm = LLMClient(settings.llm)
+        self.llm = build_llm(settings.llm)
         self.embedding = build_embedding(
             settings.rag, llm_api_key=settings.llm.api_key, llm_api_base=settings.llm.api_base
         )
         self.store = VectorStore(settings.rag)
         self.avatar = LiveTalkingAvatar(settings.avatar)
+        self.omni = build_omni(settings.omni, debug=self.debug)
         self.retriever = Retriever(
             store=self.store, embedding=self.embedding, settings=settings.rag, debug=self.debug
         )
@@ -60,6 +62,8 @@ class Container:
             ),
             avatar=self.avatar,
             debug=self.debug,
+            omni=self.omni,
+            voice_mode=settings.omni.voice_mode,
         )
 
     async def startup(self) -> None:
@@ -69,6 +73,7 @@ class Container:
 
     async def shutdown(self) -> None:
         await self.avatar.aclose()
+        await self.omni.aclose()
         self.store.close()
         self.storage.close()
 
@@ -151,16 +156,31 @@ class CorpusAgentRequest(BaseModel):
 
 @app.get("/api/meta")
 async def meta(ctx: Ctx) -> dict[str, Any]:
-    llm, avatar, vector = await ctx.llm.health(), await ctx.avatar.health(), await ctx.store.health()
+    llm, avatar, vector, omni = (
+        await ctx.llm.health(),
+        await ctx.avatar.health(),
+        await ctx.store.health(),
+        await ctx.omni.health(),
+    )
     return {
         "llm": llm.model_dump(),
         "avatar": avatar.model_dump(),
         "vector": vector.model_dump(),
+        "omni": omni.model_dump(),
+        "voice_mode": settings.omni.voice_mode,
         "embedding": {
             "provider": settings.rag.embedding_provider,
             "dim": settings.rag.embedding_dim,
         },
+        "llm_provider": settings.llm.provider,
         "debug_default": settings.debug_default,
+        "presets": [
+            {"role": "后端工程师", "style": "probe", "rounds": 8},
+            {"role": "前端工程师", "style": "probe", "rounds": 8},
+            {"role": "算法工程师", "style": "probe", "rounds": 8},
+            {"role": "产品经理", "style": "gentle", "rounds": 8},
+            {"role": "客户端工程师", "style": "probe", "rounds": 8},
+        ],
     }
 
 
@@ -199,6 +219,43 @@ async def send_message(session_id: str, payload: MessageRequest, ctx: Ctx) -> St
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/sessions/{session_id}/voice/turn")
+async def voice_turn(
+    session_id: str,
+    ctx: Ctx,
+    file: UploadFile | None = File(None),
+    end: bool = Form(False),
+) -> StreamingResponse:
+    """MVP：整段录音上传（按住说完再传）。预留后续 WS /voice/stream。"""
+    session = ctx.session(session_id)
+    ctx.pipeline.attach_debug(session_id)
+    audio = await file.read() if file is not None else b""
+
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            async for kind, data in ctx.pipeline.voice_turn(session, audio=audio, end=end):
+                yield _sse({"event": kind, **data})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse({"event": "error", "message": str(exc)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/sessions/{session_id}/voice/interrupt")
+async def voice_interrupt(session_id: str, ctx: Ctx) -> dict[str, Any]:
+    session = ctx.session(session_id)
+    if session.rtc_session_id:
+        try:
+            await ctx.avatar.interrupt(session.rtc_session_id)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "detail": str(exc)}
+    return {"ok": True}
 
 
 @app.get("/api/sessions/{session_id}")
@@ -279,13 +336,35 @@ async def list_corpus(
     kind: str | None = None,
     status: str | None = None,
     limit: int = 200,
+    with_content: bool = False,
 ) -> dict[str, Any]:
-    return {"items": ctx.corpus.list(role=role, kind=kind, status=status, limit=limit)}
+    items = ctx.corpus.list(role=role, kind=kind, status=status, limit=limit)
+    if with_content and items:
+        full = {e.id: e for e in await ctx.corpus.get_many([row["id"] for row in items])}
+        enriched = []
+        for row in items:
+            entry = full.get(row["id"])
+            if entry is None:
+                enriched.append(row)
+            else:
+                data = entry.model_dump()
+                data.update({k: row[k] for k in ("status", "version", "updated_at") if k in row})
+                enriched.append(data)
+        return {"items": enriched}
+    return {"items": items}
 
 
 @app.get("/api/corpus/stats")
 async def corpus_stats(ctx: Ctx) -> dict[str, Any]:
     return await ctx.corpus.stats()
+
+
+@app.get("/api/corpus/{entry_id}")
+async def get_corpus(entry_id: str, ctx: Ctx) -> dict[str, Any]:
+    entry = await ctx.corpus.get(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="语料不存在或正文未入库")
+    return {"entry": entry.model_dump()}
 
 
 @app.post("/api/corpus")

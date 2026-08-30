@@ -104,6 +104,22 @@ class VectorStore:
             hits.append(CorpusHit(entry=CorpusEntry(**point.payload), score=float(point.score)))
         return hits
 
+    async def get(self, entry_ids: list[str]) -> list[CorpusEntry]:
+        if not entry_ids:
+            return []
+        records = await asyncio.to_thread(
+            self._client.retrieve,
+            collection_name=self._collection,
+            ids=[point_id(i) for i in entry_ids],
+            with_payload=True,
+        )
+        entries: list[CorpusEntry] = []
+        for record in records:
+            if not record.payload:
+                continue
+            entries.append(CorpusEntry(**record.payload))
+        return entries
+
     async def set_status(self, entry_ids: list[str], status: str) -> None:
         await asyncio.to_thread(
             self._client.set_payload,

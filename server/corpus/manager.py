@@ -90,6 +90,13 @@ class CorpusManager:
     ) -> list[dict[str, Any]]:
         return self._storage.list_corpus_meta(role=role, kind=kind, status=status, limit=limit)
 
+    async def get(self, entry_id: str) -> CorpusEntry | None:
+        entries = await self._store.get([entry_id])
+        return entries[0] if entries else None
+
+    async def get_many(self, entry_ids: list[str]) -> list[CorpusEntry]:
+        return await self._store.get(entry_ids)
+
     async def stats(self) -> dict[str, Any]:
         return {"by_status": self._storage.corpus_stats(), "vectors": await self._store.count()}
 

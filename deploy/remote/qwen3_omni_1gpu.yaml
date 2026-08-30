@@ -1,0 +1,62 @@
+# Qwen3-Omni 单卡 A100 40GB：Thinker / Talker / Code2Wav 都绑 GPU 0。
+# 官方 qwen3_omni_moe.yaml 默认 stage1/2 在 cuda:1，且 context 65536，40GB 会 OOM。
+async_chunk: false
+
+connectors:
+  connector_of_shared_memory:
+    name: SharedMemoryConnector
+    extra:
+      initial_codec_chunk_frames: 4
+      codec_chunk_frames: 25
+      codec_left_context_frames: 25
+
+stages:
+  - stage_id: 0
+    devices: "0"
+    gpu_memory_utilization: 0.50
+    max_model_len: 4096
+    max_num_seqs: 1
+    max_num_batched_tokens: 4096
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    default_sampling_params:
+      temperature: 0.0
+      max_tokens: 1024
+
+  - stage_id: 1
+    devices: "0"
+    gpu_memory_utilization: 0.24
+    max_model_len: 4096
+    max_num_seqs: 1
+    max_num_batched_tokens: 4096
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    input_connectors:
+      from_stage_0: connector_of_shared_memory
+    default_sampling_params:
+      temperature: 0.9
+      top_k: 50
+      max_tokens: 2048
+      repetition_penalty: 1.05
+
+  - stage_id: 2
+    devices: "0"
+    gpu_memory_utilization: 0.08
+    max_model_len: 8192
+    max_num_seqs: 1
+    max_num_batched_tokens: 8192
+    enforce_eager: true
+    trust_remote_code: true
+    enable_prefix_caching: false
+    enable_chunked_prefill: false
+    async_scheduling: false
+    input_connectors:
+      from_stage_1: connector_of_shared_memory
+    default_sampling_params:
+      temperature: 0.0
+      top_p: 1.0
+      top_k: -1
+      max_tokens: 8192
+      repetition_penalty: 1.1
