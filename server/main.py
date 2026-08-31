@@ -435,7 +435,8 @@ else:
         return JSONResponse(
             {
                 "service": "virtual-interviewer",
-                "hint": "前端未构建，执行 cd web && npm install && npm run dev",
+                "hint": "开发时请打开前端 Vite：http://127.0.0.1:5173 （make web）。或先 cd web && npm run build 再访问本端口。",
+                "frontend": "http://127.0.0.1:5173",
                 "docs": "/docs",
             }
         )

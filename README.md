@@ -13,13 +13,34 @@ LLM 与数字人通过配置接入。默认 `VOICE_MODE=text`（浏览器 Web Sp
 ## 快速开始
 
 ```bash
-make venv          # 创建 .venv、安装依赖、生成 .env
-make smoke         # 用假 LLM 跑通「开场 → 答题 → 收尾 → 报告」全链路
-make dev           # 启动后端 http://127.0.0.1:8090
-make web           # 另开终端启动前端 http://127.0.0.1:5173
+make venv          # 创建 .venv、安装依赖、生成 .env（已有可跳过）
+make smoke         # 可选：假 LLM 跑通全链路自检
 ```
 
-`make smoke` 不需要 GPU、模型或数字人服务，用于验证骨架自洽。真实面试需要配置 LLM。
+**两个终端分别启动后端与前端：**
+
+```bash
+# 终端 1 — 后端 API（会先自动释放被占用的 8090）
+make dev
+# → http://127.0.0.1:8090   （/docs、/api/*；没有 web/dist 时根路径只返回 JSON）
+
+# 终端 2 — 前端界面（会先自动释放被占用的 5173）
+make web
+# → http://127.0.0.1:5173   ← 浏览器请打开这个地址
+
+make open-web      # 可选：用系统浏览器打开前端
+```
+
+| 命令 | 地址 | 说明 |
+| --- | --- | --- |
+| `make free-port` | 默认 `:8090` | 只释放端口，不启动服务；`PORT=xxxx make free-port` 可指定 |
+| `make dev` | `:8090` | 后端；启动前自动 `free-port` |
+| `make web` | `:5173` | 前端 Vite；启动前自动释放 5173 |
+| `make open-web` | — | `open http://127.0.0.1:5173` |
+
+> **常见误区**：打开 `http://127.0.0.1:8090` 看不到界面是正常的——那是 API。开发时请打开 **http://127.0.0.1:5173**。生产/联调若要走同一端口，先 `cd web && npm run build`，后端会托管 `web/dist`。
+
+`make smoke` 不需要 GPU、模型或数字人服务。真实面试需配置 LLM；语音口型需 `VOICE_MODE=omni` + LiveTalking（见下文远端部署）。
 
 ### 语料入库（RAG）
 
